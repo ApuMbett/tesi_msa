@@ -1,0 +1,14 @@
+[project]
+name = "tesi"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+
+# Removed because of version conflicts
+# [tool.uv.workspace]
+# members = [
+#     "semantic_msa",
+# ]
