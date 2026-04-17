@@ -57,6 +57,8 @@ class SnappedCuePoint:
         self.time = nearest_beat
 
         #! FIX: i have noticed that snapping is working but the cue points are often snapped with a 4 beats offset. i could build the beat grid in a way that it takes as an anchor the cue point with most confidence and then build the grid from there.
+
+        # ^^ also: see the blablabla example, the first downbeat is already the anchor and the one with the most confidence and yet the results are still offset by 4 beats later. so i don't know if the heuristic above is going to work. 
       
 
     def _calculate_combined_score(self, quantization_error_ratio: float) -> float:
