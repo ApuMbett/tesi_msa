@@ -19,68 +19,101 @@ class RawCuePoint:
           "confidence_score": self.score,
         }
 
+
+from beatnet_wrapper import BeatNetWrapper
 class SnappedCuePoint:
     """
     Represents a cue point after snapping to the nearest downbeat in the beat grid.
     This class encapsulates the structural alignment process and the evaluation of the cue point's reliability based on psychoacoustic thresholds (taking bpm into account).
     """
-    def __init__(self, raw_cue_point: RawCuePoint, downbeat_grid, bpm):
+    def __init__(self, raw_cue_point: RawCuePoint, beat_grid: BeatNetWrapper):
+
+        if beat_grid.beats is None:
+            raise ValueError("Beat grid must be computed before snapping cue points.")
+        
         self.raw = raw_cue_point
         
         # Snap the raw cue point to the nearest downbeat in the grid
-        self._snap_to_downbeat(downbeat_grid)
+        token_boundaries = beat_grid.get_semantic_audio_token_boundaries()
+        self._snap_to_downbeat(token_boundaries)
 
         # Calculate the displacement error
         self.error = abs(self.time - self.raw.time)
 
+
         # Evaluate the accuracy of the snapped cue point based on psychoacoustic thresholds
-        self.quantization_error_ratio = self._calculate_quantization_error_ratio(bpm)
-        self.score = self._calculate_combined_score(bpm)
+        self.quantization_error_ratio = self._calculate_quantization_error_ratio(beat_grid)
+        self.score = self._calculate_combined_score(self.quantization_error_ratio)
 
 
-    def _snap_to_downbeat(self, downbeat_grid):
+    def _snap_to_downbeat(self, token_boundaries: list[int]):
         """
         Quantizes the raw CUE-DETR prediction to the nearest structural grid point.
         The CUE-DETR paper notes that DJ mixes strictly adhere to high-level track 
         structures (phrases/bars). Snapping enforces this structural alignment.
         """
         # Find the nearest beat/downbeat in the provided grid
-        nearest_beat = min(beat_grid, key=lambda x: abs(x - self.raw.time))
+        nearest_beat = min(token_boundaries, key=lambda x: abs(x - self.raw.time))
         self.time = nearest_beat
+
+        #! FIX: i have noticed that snapping is working but the cue points are often snapped with a 4 beats offset. i could build the beat grid in a way that it takes as an anchor the cue point with most confidence and then build the grid from there.
       
 
-    def _calculate_combined_score(self, bpm):
+    def _calculate_combined_score(self, quantization_error_ratio: float) -> float:
         """
         Calculates the Mix Readiness Score by decaying the AI's confidence 
         based on its Quantization Error Ratio.
         """
-
-        quantization_error_ratio = self._calculate_quantization_error_ratio(bpm)
         # The AI's confidence decays linearly as the error ratio increases
-        adjusted_score = self.raw.model_confidence * (1.0 - quantization_error_ratio)
+        adjusted_score = self.raw.score * (1.0 - quantization_error_ratio)
         
         return round(adjusted_score, 3)
 
-    def _calculate_quantization_error_ratio(self, bpm):
+    def _calculate_quantization_error_ratio(self, beat_grid: BeatNetWrapper, threshold_ms=50) -> float:
         """
-        Calculates the Quantization Error Ratio, which is the ratio of the cue point's displacement error to the maximum forgivable error based on the track's BPM.
+        Calculates the Quantization Error Ratio, which is the ratio of the cue point's displacement error to the maximum forgivable error based on the track's local BPM.
         This ratio is crucial for evaluating the reliability of the cue point and adjusting the AI's confidence score accordingly.
 
-        $$QER = \max \left(0, \min \left(1, \frac{\text{error} - 50}{\text{max\_error} - 50} \right) \right)$$
+        this metric is tempo agnostic as it scales the error relative to the beat duration, so it measures how many "beats" the error represents, rather than just the raw time in milliseconds. This allows for a more meaningful evaluation of the cue point's accuracy across different tempos and so offers a more consistent basis for adjusting the confidence score and comparing cue points across tracks with varying BPMs.
+
+        $$QER = \max \left(0, \min \left(1, \frac{\text{error} - threshold_ms }{\text{max\_error} - threshold_ms } \right) \right)$$
         """
-        beat_duration_ms = 60000 / bpm
+
+        #find start and end indexes of times in beat_grid for the token that contains the cue point
+        token_boundaries = beat_grid.get_semantic_audio_token_boundaries()
+
+        # we need to calculate the local bpm for the token that contains the cue point. 
+        # so we need to find the start and end times of the token that contains the cue point, and then calculate the bpm for that token.
+
+        # 1. Find the start time (equal to or just before the raw time)
+        start_time = max(t for t in token_boundaries if t <= self.raw.time)
+
+        # 2. Find future boundaries (MUST be strictly greater to avoid 0 duration)
+        future_boundaries = [t for t in token_boundaries if t > self.raw.time]
+
+        if future_boundaries:
+            end_time = min(future_boundaries)
+        else:
+            # Failsafe: If the cue is at the very end of the track, look backward
+            end_time = start_time
+            # Assuming token_boundaries has at least 2 elements
+            start_time = token_boundaries[-2]
+
+        # Calculate the beat duration in milliseconds based on local BPM
+        beat_duration_ms = (end_time - start_time) / beat_grid.beats_per_token
+        
 
         # The maximum forgivable error is typically set to half the beat duration, as errors larger than this would likely be perceptible and detrimental to the mix.
         max_forgivable_error = beat_duration_ms / 2
         
         
 
-        # Full confidence for errors within 50ms, as they are generally imperceptible in a DJ mix context, regardless of BPM. This threshold is based on psychoacoustic research on temporal perception in music. [TODO - find source for this threshold]
-        # 1. Apply the 50ms "Deadzone" (anything under 50 becomes 0)
-        effective_error = max(0.0, self.error - 50)
+        # Full confidence for errors within threshold_ms ms, as they are generally imperceptible in a DJ mix context, regardless of BPM. This threshold is based on psychoacoustic research on temporal perception in music. [TODO - find source for this threshold]
+        # 1. Apply the threshold_ms ms "Deadzone" (anything under threshold_ms  becomes 0)
+        effective_error = max(0.0, self.error - threshold_ms )
         
         # 2. Adjust the maximum scale to account for the deadzone
-        effective_max = max_forgivable_error - 50
+        effective_max = max_forgivable_error - threshold_ms 
         
         # 3. Calculate ratio and "Clamp" the maximum value to 1.0
         qer = min(1.0, effective_error / effective_max)
@@ -103,4 +136,39 @@ class SnappedCuePoint:
 
 
 if __name__ == "__main__":
-  pass
+  # demo, reads the cue points from a json file 
+    song = "blablabla.mp3"
+    import json
+    with open("../../cue-detr/tracks/_cue_points.json", "r") as f:
+        #debug: print full path 
+        import os 
+        print("Reading cue points from:", os.path.abspath("../../cue-detr/tracks/_cue_points.json"))
+        data = json.load(f)
+        shotmedown_cues = data[song]
+
+        # note: the cue points in the json file are in seconds, we need to convert them to milliseconds for the RawCuePoint class and i don't know if this is the right precision 
+        raw_cues = [RawCuePoint(time_ms = int(cue["time"]*1000), score = cue["score"]) for cue in shotmedown_cues]
+
+        print("Raw Cue Points:")
+        for cue in raw_cues:
+            print("Raw Cue Point:", cue.json())
+
+        #snap the raw cues to the beat grid
+        beat_grid = BeatNetWrapper(audio_path = "../data/raw_audio/"+song)
+        snapped_cues = [SnappedCuePoint(raw_cue, beat_grid) for raw_cue in raw_cues]
+
+
+        print("\nSnapped Cue Points:")
+        for snapped_cue in snapped_cues:
+            print("Snapped Cue Point:", snapped_cue.json())
+
+
+        print("\nBoundaries for semantic audio tokens (blocks of bars):", beat_grid.get_semantic_audio_token_boundaries())
+        print("Global BPM:", beat_grid.compute_global_bpm())
+        print("BPM for each 16-beat token: ")
+        for i in range(len(beat_grid.get_semantic_audio_token_boundaries())-1
+            ):
+            start_time = beat_grid.get_semantic_audio_token_boundaries()[i]
+            end_time = beat_grid.get_semantic_audio_token_boundaries()[i+1]
+            bpm = beat_grid._compute_token_bpm(start_time, end_time)
+            print(f"Token {i}: Start={start_time}ms, End={end_time}ms, BPM={bpm}")
