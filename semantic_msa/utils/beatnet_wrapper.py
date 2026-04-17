@@ -5,7 +5,8 @@ class BeatNetWrapper:
   """
     Wrapper around BeatNet to extract beat grid information and convert it to a format suitable for our application. This class can be initialized with either raw BeatNet output or an audio file path, and provides methods to retrieve the full beat grid, downbeats, pixel boundaries for blocks of bars, and both global and local BPM estimates. 
   """
-  def __init__(self, raw_beatnet_output = None, audio_path = None):
+  def __init__(self, raw_beatnet_output = None, audio_path = None, beats_per_token = 16):
+    self.beats_per_token = beats_per_token
     if raw_beatnet_output is not None:
         self.beats = BeatNetWrapper._sanitize_raw_data(raw_beatnet_output)
     elif audio_path is not None:
@@ -33,7 +34,7 @@ class BeatNetWrapper:
     return [time for time, beat in self.beats if beat == 1]
 
 
-  def get_semantic_audio_token_boundaries(self, beats_per_token = 16):
+  def get_semantic_audio_token_boundaries(self):
     """
     Converts the beat grid into boundaries for semantic audio tokens, which represent blocks of bars. This method identifies the first downbeat to ensure phase-locked phrasing, slices the grid accordingly, and applies intro and tail padding to capture the full track duration. The resulting boundaries are crucial for structuring the track into meaningful segments for DJ mix preparation.
     """
@@ -44,7 +45,7 @@ class BeatNetWrapper:
         anchor_idx = 0  # Failsafe if no downbeats are found at all
         
     # 2. Slice the grid starting strictly from the Anchor
-    boundaries = [time for time, beat in self.beats[anchor_idx::beats_per_token]]
+    boundaries = [time for time, beat in self.beats[anchor_idx::self.beats_per_token]]
     
     # 3. Intro Pad: Insert 0 only if the first downbeat isn't already at 0
     if boundaries and boundaries[0] > 0:
@@ -69,16 +70,26 @@ class BeatNetWrapper:
       for i in range(len(token_boundaries)-1):
         start_time = token_boundaries[i]
         end_time = token_boundaries[i+1]
-        # find the corresponding beat indices for the start and end times
-        start_beat_index = next(j for j, (time, beat) in enumerate(bn.get_full_grid()) if time >= start_time)
-        end_beat_index = next(j for j, (time, beat) in enumerate(bn.get_full_grid()) if time >= end_time)
-        bpm = bn.compute_bpm(start_beat_index, end_beat_index)
+        bpm = self._compute_token_bpm(start_time, end_time)
         if bpm is not None:
           bpm_estimates.append(bpm)
       
       most_common = Counter(bpm_estimates).most_common(1)
       return float(most_common[0][0])
 
+  def _compute_token_bpm(self, start_time_ms, end_time_ms):
+        """Returns the BPM for a specific token defined by start_time and end_time.
+
+            for performance reasons, this helper method computes the BPM for a token which we know is self.beats_per_token beats long so we can directly calculate the BPM using the duration of the token, without needing to count the number of beats within it. This is more efficient than the general compute_bpm method when we are specifically working with fixed-length tokens.
+        """
+        # find the corresponding beat indices for the start and end times
+        duration_ms = end_time_ms - start_time_ms
+      
+        if duration_ms <= 0:
+          return None
+          
+        bpm = (self.beats_per_token * 60000) / duration_ms
+        return round(bpm, 1)
 
   def compute_bpm(self, start_beat_index, end_beat_index):
       """Returns the macro BPM for a specific segment by measuring total duration."""
