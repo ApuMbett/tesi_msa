@@ -26,7 +26,7 @@ class SnappedCuePoint:
     Represents a cue point after snapping to the nearest downbeat in the beat grid.
     This class encapsulates the structural alignment process and the evaluation of the cue point's reliability based on psychoacoustic thresholds (taking bpm into account).
     """
-    def __init__(self, raw_cue_point: RawCuePoint, beat_grid: BeatNetWrapper):
+    def __init__(self, raw_cue_point: RawCuePoint, beat_grid: BeatNetWrapper, downbeat_offset_to_skip = 0):
 
         if beat_grid.beats is None:
             raise ValueError("Beat grid must be computed before snapping cue points.")
@@ -34,7 +34,7 @@ class SnappedCuePoint:
         self.raw = raw_cue_point
         
         # Snap the raw cue point to the nearest downbeat in the grid
-        token_boundaries = beat_grid.get_semantic_audio_token_boundaries()
+        token_boundaries = beat_grid.get_semantic_audio_token_boundaries(downbeat_offset_to_skip = downbeat_offset_to_skip)
         self._snap_to_downbeat(token_boundaries)
 
         # Calculate the displacement error
@@ -59,6 +59,8 @@ class SnappedCuePoint:
         #! FIX: i have noticed that snapping is working but the cue points are often snapped with a 4 beats offset. i could build the beat grid in a way that it takes as an anchor the cue point with most confidence and then build the grid from there.
 
         # ^^ also: see the blablabla example, the first downbeat is already the anchor and the one with the most confidence and yet the results are still offset by 4 beats later. so i don't know if the heuristic above is going to work. 
+
+        #! UPDATE: fix implemented, now the method get_semantic_audio_token_boundaries takes an optional argument downbeat_offset_to_skip which allows to skip the first N downbeats and use the N+1 th downbeat as an anchor. this allows to find the optimal anchor that minimizes the mean quantization error ratio across all cue points. (theese comments will disappear in the next commit, i just want to keep track of the thought process here)
       
 
     def _calculate_combined_score(self, quantization_error_ratio: float) -> float:

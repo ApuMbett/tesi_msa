@@ -34,16 +34,21 @@ class BeatNetWrapper:
     return [time for time, beat in self.beats if beat == 1]
 
 
-  def get_semantic_audio_token_boundaries(self):
+  def get_semantic_audio_token_boundaries(self, downbeat_offset_to_skip = 0):
     """
     Converts the beat grid into boundaries for semantic audio tokens, which represent blocks of bars. This method identifies the first downbeat to ensure phase-locked phrasing, slices the grid accordingly, and applies intro and tail padding to capture the full track duration. The resulting boundaries are crucial for structuring the track into meaningful segments for DJ mix preparation.
     """
-    # 1. Find the index of the FIRST downbeat (where beat == 1 or 1.0) to ensure phase-locked 16-beat phrasing
-    try:
-        anchor_idx = next(i for i, (time, beat) in enumerate(self.beats) if beat == 1)
-    except StopIteration:
-        anchor_idx = 0  # Failsafe if no downbeats are found at all
-        
+    # 1. Find the index of the FIRST downbeat (anchor) (where beat == 1 or 1.0) to ensure phase-locked 16-beat phrasing
+    # Find the indices of ALL downbeats (where beat == 1)
+    downbeat_indices = [i for i, (time, beat) in enumerate(self.beats) if beat == 1]
+    
+    if not downbeat_indices:
+        anchor_idx = 0  # Failsafe
+    else:
+        # Safely get the Nth downbeat (wrap around if offset is somehow too high)
+        safe_offset = min(downbeat_offset_to_skip, len(downbeat_indices) - 1)
+        anchor_idx = downbeat_indices[safe_offset]  
+
     # 2. Slice the grid starting strictly from the Anchor
     boundaries = [time for time, beat in self.beats[anchor_idx::self.beats_per_token]]
     
