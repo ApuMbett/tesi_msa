@@ -26,12 +26,13 @@ class SnappedCuePoint:
     Represents a cue point after snapping to the nearest downbeat in the beat grid.
     This class encapsulates the structural alignment process and the evaluation of the cue point's reliability based on psychoacoustic thresholds (taking bpm into account).
     """
-    def __init__(self, raw_cue_point: RawCuePoint, beat_grid: BeatNetWrapper, downbeat_offset_to_skip = 0):
+    def __init__(self, raw_cue_point: RawCuePoint, beat_grid: BeatNetWrapper, downbeat_offset_to_skip = 0, structural_penalty_weight = 0.5):
 
         if beat_grid.beats is None:
             raise ValueError("Beat grid must be computed before snapping cue points.")
         
         self.raw = raw_cue_point
+        self.structural_penalty_weight = structural_penalty_weight # this weight determines how much the quantization error ratio will affect the final score, allowing for tuning based on how strict we want to be about structural alignment versus raw confidence. between 0 and 1, where 0 means no penalty and 1 means full penalty based on the quantization error ratio. when 1 the structural alignment has maximum importance, when 0 the raw confidence score has maximum importance.
         
         # Snap the raw cue point to the nearest downbeat in the grid
         token_boundaries = beat_grid.get_semantic_audio_token_boundaries(downbeat_offset_to_skip = downbeat_offset_to_skip)
@@ -55,12 +56,6 @@ class SnappedCuePoint:
         # Find the nearest beat/downbeat in the provided grid
         nearest_beat = min(token_boundaries, key=lambda x: abs(x - self.raw.time))
         self.time = nearest_beat
-
-        #! FIX: i have noticed that snapping is working but the cue points are often snapped with a 4 beats offset. i could build the beat grid in a way that it takes as an anchor the cue point with most confidence and then build the grid from there.
-
-        # ^^ also: see the blablabla example, the first downbeat is already the anchor and the one with the most confidence and yet the results are still offset by 4 beats later. so i don't know if the heuristic above is going to work. 
-
-        #! UPDATE: fix implemented, now the method get_semantic_audio_token_boundaries takes an optional argument downbeat_offset_to_skip which allows to skip the first N downbeats and use the N+1 th downbeat as an anchor. this allows to find the optimal anchor that minimizes the mean quantization error ratio across all cue points. (theese comments will disappear in the next commit, i just want to keep track of the thought process here)
       
 
     def _calculate_combined_score(self, quantization_error_ratio: float) -> float:
@@ -68,8 +63,9 @@ class SnappedCuePoint:
         Calculates the Mix Readiness Score by decaying the AI's confidence 
         based on its Quantization Error Ratio.
         """
-        # The AI's confidence decays linearly as the error ratio increases
-        adjusted_score = self.raw.score * (1.0 - quantization_error_ratio)
+        # The structural penalty is a linear decay of the raw confidence score based on the quantization error ratio, weighted by the structural_penalty_weight. This allows for tuning how much the structural alignment should influence the final score, balancing between raw confidence and structural reliability.
+        structural_penalty = quantization_error_ratio * self.structural_penalty_weight
+        adjusted_score = self.raw.score * (1.0 - structural_penalty)
         
         return round(adjusted_score, 3)
 
@@ -117,10 +113,10 @@ class SnappedCuePoint:
         effective_error = max(0.0, self.error - threshold_ms )
         
         # 2. Adjust the maximum scale to account for the deadzone
-        effective_max = max_forgivable_error - threshold_ms 
+        effective_max = max(0.001, max_forgivable_error - threshold_ms) # The 0.001 prevents division by zero
         
         # 3. Calculate ratio and "Clamp" the maximum value to 1.0
-        qer = min(1.0, effective_error / effective_max)
+        qer = max(0.0, min(1.0, effective_error / effective_max)) # Clamp strictly between 0 and 1
 
         # No confidence for errors larger than the maximum forgivable error, as they would likely be perceptible and detrimental to the mix
         

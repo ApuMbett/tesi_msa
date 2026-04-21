@@ -3,7 +3,7 @@ from cue_point import RawCuePoint, SnappedCuePoint
 import json
 
 class Track:
-  def __init__(self, path, name, author, beats_per_token = 16):
+  def __init__(self, path, name, author, beats_per_token = 16, structural_penalty_weight = 0.5):
     self.path = path
     self.name = name
     self.author = author
@@ -13,13 +13,13 @@ class Track:
 
     # self.dsp_features["bpm"] = self.bn.compute_global_bpm()
 
-    # when we compute the token boundaries we find the phase offset that minimizes the mean qer. the cue points are snapped to downbeats in a way that the mean qer is minimized.
+    # when we compute the token boundaries we find the phase offset that maximizes the score. the cue points are snapped to downbeats in a way that the mean score is maximized.
     self.best_phase_offset = None
-    self.mean_qer = None
+    self.mean_score = None
     self.token_boundaries = []
     self.snapped_cues = []
 
-    self._compute_snapped_cue_points()
+    self._compute_snapped_cue_points(structural_penalty_weight = structural_penalty_weight)
 
 
 
@@ -37,18 +37,21 @@ class Track:
       return [RawCuePoint(time_ms = int(cue["time"]*1000), score = cue["score"]) for cue in shotmedown_cues]
     
 
-  def _compute_snapped_cue_points(self) -> list[SnappedCuePoint]:
+  def _compute_snapped_cue_points(self, structural_penalty_weight = 0.5) -> list[SnappedCuePoint]:
     for i in range(self.bn.beats_per_token//4):
-        snapped_cues = [SnappedCuePoint(raw_cue, self.bn, downbeat_offset_to_skip = i) for raw_cue in self.raw_cue_points]
+        snapped_cues = [SnappedCuePoint(raw_cue, self.bn, downbeat_offset_to_skip = i, structural_penalty_weight = structural_penalty_weight) for raw_cue in self.raw_cue_points]
         #! ^ this will be refactored later, snappedcuepoint should not take the whole beat grid as an argument now that the track class exists 
-        mean_qer = sum(cue.quantization_error_ratio for cue in snapped_cues) / len(snapped_cues)
-        if self.mean_qer is None or mean_qer < self.mean_qer:
-            self.mean_qer = mean_qer
+
+        # maximize the mean score across all snapped cues
+        mean_score = sum(cue.score for cue in snapped_cues) / len(snapped_cues)
+        if self.mean_score is None or mean_score > self.mean_score:
+            self.mean_score = mean_score
             self.best_phase_offset = i
             self.snapped_cues = snapped_cues
             self.token_boundaries = self.bn.get_semantic_audio_token_boundaries(downbeat_offset_to_skip = i)
+            #!^ problem: token boundaries now include tail and intro pad, this was necessary for completeness. now we can move this to the track class, this is necessary because (see blablabla) we have the micro intro pad that has 8000 bpm and so the qer is very high. even though it's few ms 
         
-        print(f"\n\n\n\n######## Phase offset {i}: mean QER={mean_qer} ########") 
+        print(f"\n\n\n\n######## Phase offset {i}: mean score={mean_score} ########") 
         print(F"token boundaries={self.token_boundaries}") 
         print("Snapped Cue Points for this phase offset:")
         for snapped_cue in snapped_cues:
@@ -56,14 +59,14 @@ class Track:
   
 
 if __name__ == "__main__":
-  import os 
-  print("Testing Track class with audio file:", os.path.abspath("../data/raw_audio/shotmedown.mp3"))
-  track = Track(path = "../../data/raw_audio/shotmedown.mp3", name = "shotmedown.mp3", author = "unknown")
+
+  filename = "blablabla.mp3"
+  track = Track(path = "../../data/raw_audio/" + filename, name = filename, author = "unknown")
   track._compute_snapped_cue_points()
 
   print("\n\n\n\n############ BEST ##############")
   print("Best phase offset (in beats):", track.best_phase_offset)
-  print("Mean Quantization Error Ratio for best phase offset:", track.mean_qer)
+  print("Mean score for best phase offset:", track.mean_score)
   print("Token boundaries (ms):", track.token_boundaries)
   print("Snapped Cue Points:")
   for snapped_cue in track.snapped_cues:
