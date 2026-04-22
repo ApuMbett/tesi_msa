@@ -1,7 +1,33 @@
 from beatnet_wrapper import BeatNetWrapper
 from cue_point import RawCuePoint, SnappedCuePoint
 import json
+class Token: 
+  def __init__(self, index, start_time_ms, end_time_ms, is_mixable, dsp_features, start_cue = None, end_cue = None):
+    self.index = index
+    self.start_time_ms = start_time_ms
+    self.end_time_ms = end_time_ms
+    self.is_mixable = is_mixable
+    self.start_cue = start_cue
+    self.end_cue = end_cue
 
+    self.caption = None # TODO this will be generated later by the captioning model, it's not important for now
+    self.dsp_features = dsp_features # TODO this will hold the dsp features for the token, such as bpm, key, energy, etc. we can compute these later using the beatnet wrapper and other tools. it's not important for now
+  
+  def get_audio_segment(self):
+    # TODO this will return the audio segment corresponding to the token, pydub to do this. it's not important for now
+    pass
+  
+  def json(self):
+    return {
+      "index": self.index,
+      "start_time_ms": self.start_time_ms,
+      "end_time_ms": self.end_time_ms,
+      "is_mixable": self.is_mixable,
+      "start_cue": self.start_cue.json() if self.start_cue else None,
+      "end_cue": self.end_cue.json() if self.end_cue else None,
+      "caption": self.caption,
+      "dsp_features": self.dsp_features,
+    }
 class Track:
   def __init__(self, path, name, author, beats_per_token = 16, structural_penalty_weight = 0.5):
     self.path = path
@@ -20,7 +46,10 @@ class Track:
     self.snapped_cues = []
 
     self._compute_snapped_cue_points(structural_penalty_weight = structural_penalty_weight)
+    self.duration_ms = self.bn.beats[-1][0]
 
+
+    self.tokens = self._build_token_map()
 
 
   def _compute_raw_cue_points(self) -> list[RawCuePoint]:
@@ -56,14 +85,62 @@ class Track:
         print("Snapped Cue Points for this phase offset:")
         for snapped_cue in snapped_cues:
             print(snapped_cue.json())
-  
+
+  def _build_token_map(self) -> list[Token]:
+    boundaries = [b for b in self.token_boundaries]  # Make a copy to avoid modifying the original list of token boundaries
+
+    # Add intro and tail padding to ensure we map the full track, theese segments though won't be mixable, they will just be used for completeness and to make sure we don't miss any cue points that are close to the start or the end of the track.
+    # 1. Intro Pad: Insert 0 only if the first downbeat isn't already at 0
+    if boundaries and boundaries[0] > 0:
+        boundaries.insert(0, 0)
+    
+    # 2. Tail Pad: Append the last beat only if it isn't already captured
+    if boundaries and boundaries[-1] != self.duration_ms:
+        boundaries.append(self.duration_ms)
+
+    tokens = []
+
+    # Iterate through the boundaries to create tokens
+    for i in range(len(boundaries) - 1):
+        start_time_ms = boundaries[i]
+        end_time_ms = boundaries[i + 1]
+
+        # Determine if the token is mixable based on its position
+        is_mixable = (i > 0 and i < len(boundaries) - 2)  # Only tokens that are not intro or tail pads are mixable
+
+        # Determine if the token contains any snapped cue points and if so, check if they are at the start or the end of the token. 
+        start_cue, end_cue = self._determine_token_cues(start_time_ms, end_time_ms)
+
+        # TODO DSP features
+        dsp_features = {}
+        dsp_features["BPM"] = self.bn._compute_token_bpm(start_time_ms, end_time_ms)
+        # TODO captioning 
+        token = Token(i, start_time_ms, end_time_ms, is_mixable, dsp_features, start_cue = start_cue, end_cue = end_cue)
+        tokens.append(token)
+
+    return tokens
+
+  def _determine_token_cues(self, start_time_ms, end_time_ms):
+    # Check if any snapped cue points fall within the token boundaries
+    token_cues = [cue for cue in self.snapped_cues if start_time_ms <= cue.time <= end_time_ms]
+    
+    # Determine if there are cues at the start or end of the token
+    start_cue = None
+    end_cue = None
+    for cue in token_cues:
+        if cue.time == start_time_ms:
+            start_cue = cue
+        elif cue.time == end_time_ms:
+            end_cue = cue
+    
+    return start_cue, end_cue
+
+
 
 if __name__ == "__main__":
 
   filename = "blablabla.mp3"
   track = Track(path = "../../data/raw_audio/" + filename, name = filename, author = "unknown")
-  track._compute_snapped_cue_points()
-
   print("\n\n\n\n############ BEST ##############")
   print("Best phase offset (in beats):", track.best_phase_offset)
   print("Mean score for best phase offset:", track.mean_score)
@@ -71,3 +148,7 @@ if __name__ == "__main__":
   print("Snapped Cue Points:")
   for snapped_cue in track.snapped_cues:
       print(snapped_cue.json())
+
+  print("\n\n\n\n############ TOKENS ##############")
+  for token in track.tokens:
+      print(token.json())

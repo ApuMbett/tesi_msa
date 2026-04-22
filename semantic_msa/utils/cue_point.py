@@ -85,11 +85,14 @@ class SnappedCuePoint:
         # we need to calculate the local bpm for the token that contains the cue point. 
         # so we need to find the start and end times of the token that contains the cue point, and then calculate the bpm for that token.
 
+        # Note: the cue point might be outside the token boundaries if it's in the intro or tail padding. in that case we use the bpm of the closest token, which is a reasonable approximation since the intro and tail pads are typically short and we want to avoid extreme qer values for cues that are slightly outside the token boundaries.
+
         # 1. Find the start time (equal to or just before the raw time)
-        start_time = max(t for t in token_boundaries if t <= self.raw.time)
+        start_times = [t for t in token_boundaries if t <= self.raw.time]
+        start_time = max(start_times) if start_times else token_boundaries[0]  # Failsafe: if no boundaries are before the cue, use the first boundary (this can happen if the cue is in the intro pad before the first downbeat)
 
         # 2. Find future boundaries (MUST be strictly greater to avoid 0 duration)
-        future_boundaries = [t for t in token_boundaries if t > self.raw.time]
+        future_boundaries = [t for t in token_boundaries if t > start_time]
 
         if future_boundaries:
             end_time = min(future_boundaries)
