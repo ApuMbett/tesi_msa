@@ -113,10 +113,24 @@ class Track:
 
         # TODO DSP features
         dsp_features = {}
-        dsp_features["BPM"] = self.bn._compute_token_bpm(start_time_ms, end_time_ms)
+        if is_mixable:
+          # compute the bpm only if it's not a pad 
+          dsp_features["BPM"] = self.bn._compute_token_bpm(start_time_ms, end_time_ms)
         # TODO captioning 
         token = Token(i, start_time_ms, end_time_ms, is_mixable, dsp_features, start_cue = start_cue, end_cue = end_cue)
         tokens.append(token)
+
+    # fix pad bpm 
+    # if it's a padding token we just inherit the bpm from the closest real token. 
+    # 1. Fix Intro Pad (It borrows from the token immediately after it)
+    if tokens and not tokens[0].is_mixable:
+      tokens[0].dsp_features["BPM"] = tokens[1].dsp_features["BPM"]
+            
+    # 2. Fix Outro Pad (It borrows from the token immediately before it)
+    if len(tokens) > 1 and not tokens[-1].is_mixable:
+        tokens[-1].dsp_features["BPM"] = tokens[-2].dsp_features["BPM"]
+
+
 
     return tokens
 
@@ -139,7 +153,7 @@ class Track:
 
 if __name__ == "__main__":
 
-  filename = "blablabla.mp3"
+  filename = "shotmedown.mp3"
   track = Track(path = "../../data/raw_audio/" + filename, name = filename, author = "unknown")
   print("\n\n\n\n############ BEST ##############")
   print("Best phase offset (in beats):", track.best_phase_offset)
@@ -151,4 +165,4 @@ if __name__ == "__main__":
 
   print("\n\n\n\n############ TOKENS ##############")
   for token in track.tokens:
-      print(token.json())
+      print(json.dumps(token.json(), indent = 4))
