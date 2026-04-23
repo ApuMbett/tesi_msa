@@ -1,4 +1,4 @@
-from beatnet_wrapper import BeatNetWrapper
+from dsp_manager import DSPManager
 from cue_point import RawCuePoint, SnappedCuePoint
 import json
 class Token: 
@@ -34,10 +34,10 @@ class Track:
     self.name = name
     self.author = author
 
-    self.bn = BeatNetWrapper(audio_path = path, beats_per_token = beats_per_token)
+    self.dsp_manager = DSPManager(audio_path = path, beats_per_token = beats_per_token)
     self.raw_cue_points = self._compute_raw_cue_points()
 
-    # self.dsp_features["bpm"] = self.bn.compute_global_bpm()
+    # self.dsp_features["bpm"] = self.dsp_manager.compute_global_bpm()
 
     # when we compute the token boundaries we find the phase offset that maximizes the score. the cue points are snapped to downbeats in a way that the mean score is maximized.
     self.best_phase_offset = None
@@ -46,7 +46,7 @@ class Track:
     self.snapped_cues = []
 
     self._compute_snapped_cue_points(structural_penalty_weight = structural_penalty_weight)
-    self.duration_ms = self.bn.beats[-1][0]
+    self.duration_ms = self.dsp_manager.beats[-1][0]
 
 
     self.tokens = self._build_token_map()
@@ -67,8 +67,8 @@ class Track:
     
 
   def _compute_snapped_cue_points(self, structural_penalty_weight = 0.5) -> list[SnappedCuePoint]:
-    for i in range(self.bn.beats_per_token//4):
-        snapped_cues = [SnappedCuePoint(raw_cue, self.bn, downbeat_offset_to_skip = i, structural_penalty_weight = structural_penalty_weight) for raw_cue in self.raw_cue_points]
+    for i in range(self.dsp_manager.beats_per_token//4):
+        snapped_cues = [SnappedCuePoint(raw_cue, self.dsp_manager, downbeat_offset_to_skip = i, structural_penalty_weight = structural_penalty_weight) for raw_cue in self.raw_cue_points]
         #! ^ this will be refactored later, snappedcuepoint should not take the whole beat grid as an argument now that the track class exists 
 
         # maximize the mean score across all snapped cues
@@ -77,7 +77,7 @@ class Track:
             self.mean_score = mean_score
             self.best_phase_offset = i
             self.snapped_cues = snapped_cues
-            self.token_boundaries = self.bn.get_semantic_audio_token_boundaries(downbeat_offset_to_skip = i)
+            self.token_boundaries = self.dsp_manager.get_semantic_audio_token_boundaries(downbeat_offset_to_skip = i)
             #!^ problem: token boundaries now include tail and intro pad, this was necessary for completeness. now we can move this to the track class, this is necessary because (see blablabla) we have the micro intro pad that has 8000 bpm and so the qer is very high. even though it's few ms 
         
         print(f"\n\n\n\n######## Phase offset {i}: mean score={mean_score} ########") 
@@ -115,7 +115,9 @@ class Track:
         dsp_features = {}
         if is_mixable:
           # compute the bpm only if it's not a pad 
-          dsp_features["BPM"] = self.bn._compute_token_bpm(start_time_ms, end_time_ms)
+          dsp_features["BPM"] = self.dsp_manager._compute_token_bpm(start_time_ms, end_time_ms)
+          dsp_features.update(self.dsp_manager.compute_low_level_dsp_features(start_time_ms, end_time_ms)) 
+
         # TODO captioning 
         token = Token(i, start_time_ms, end_time_ms, is_mixable, dsp_features, start_cue = start_cue, end_cue = end_cue)
         tokens.append(token)
@@ -129,6 +131,8 @@ class Track:
     # 2. Fix Outro Pad (It borrows from the token immediately before it)
     if len(tokens) > 1 and not tokens[-1].is_mixable:
         tokens[-1].dsp_features["BPM"] = tokens[-2].dsp_features["BPM"]
+
+    
 
 
 

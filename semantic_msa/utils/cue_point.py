@@ -20,13 +20,13 @@ class RawCuePoint:
         }
 
 
-from beatnet_wrapper import BeatNetWrapper
+from dsp_manager import DSPManager
 class SnappedCuePoint:
     """
     Represents a cue point after snapping to the nearest downbeat in the beat grid.
     This class encapsulates the structural alignment process and the evaluation of the cue point's reliability based on psychoacoustic thresholds (taking bpm into account).
     """
-    def __init__(self, raw_cue_point: RawCuePoint, beat_grid: BeatNetWrapper, downbeat_offset_to_skip = 0, structural_penalty_weight = 0.5):
+    def __init__(self, raw_cue_point: RawCuePoint, beat_grid: DSPManager, downbeat_offset_to_skip = 0, structural_penalty_weight = 0.5):
 
         if beat_grid.beats is None:
             raise ValueError("Beat grid must be computed before snapping cue points.")
@@ -69,7 +69,7 @@ class SnappedCuePoint:
         
         return round(adjusted_score, 3)
 
-    def _calculate_quantization_error_ratio(self, beat_grid: BeatNetWrapper, threshold_ms=50) -> float:
+    def _calculate_quantization_error_ratio(self, beat_grid: DSPManager, threshold_ms=50) -> float:
         """
         Calculates the Quantization Error Ratio, which is the ratio of the cue point's displacement error to the maximum forgivable error based on the track's local BPM.
         This ratio is crucial for evaluating the reliability of the cue point and adjusting the AI's confidence score accordingly.
@@ -157,7 +157,7 @@ if __name__ == "__main__":
             print("Raw Cue Point:", cue.json())
 
         #snap the raw cues to the beat grid
-        beat_grid = BeatNetWrapper(audio_path = "../data/raw_audio/"+song)
+        beat_grid = DSPManager(audio_path = "../data/raw_audio/"+song)
         snapped_cues = [SnappedCuePoint(raw_cue, beat_grid) for raw_cue in raw_cues]
 
 
