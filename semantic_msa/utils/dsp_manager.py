@@ -4,6 +4,8 @@ from collections import Counter
 import librosa
 import os
 import subprocess
+import json
+
 AUDIO_DIR = "../data/raw_audio/"
 class DSPManager:
   """
@@ -198,11 +200,38 @@ class DSPManager:
     else:
       return False
 
+  #TODO don't know if this is the right place for these methods but for now it's easier to implement them here since they are related to the DSP features of the track, we can refactor later if needed.
   def get_lyrics(self):
     # then runs RMS-VAD on the vocal track of the song and uses WhisperX to get the lyrics. 
     # The output is the timestamps of the lyrics, word by word.
 
     # 1. split the song into vocals and instrumental using demucs
+    self.split_song_tracks()
+
+    # 2. run WhisperX on the vocal track with custom VAD (RMS-VAD, Syed et al) to get the lyrics with timestamps. 
+    # 2. Load the main Whisper into memory 
+    # TODO (will inject RMS-VAD later)
+    # i run it as a subprocess because it's easier to manage the dependencies 
+    output_json_path = f"../data/json_db/{self.track_name}/_whisper_output.json"
+    if not os.path.exists(output_json_path):
+      vocal_path = os.path.join(AUDIO_DIR, "htdemucs", self.track_name, "vocals.wav")
+      whisper_env_python = "../whisper_engine/.venv/bin/python"  # Path to the Python executable in the whisper environment
+      command = [whisper_env_python, "../whisper_engine/whisper_wrapper.py", vocal_path]
+      subprocess.run(command, check=True, )
+      # Read the JSON file left behind by the bridge script
+      print("Transcription complete. Ingesting timestamp data...")
+      if not os.path.exists(output_json_path):
+          raise FileNotFoundError("WhisperX finished, but no JSON output was found!")
+
+    with open(output_json_path, "r", encoding="utf-8") as f:
+        lyrics_data = json.load(f)
+
+    # 4. (Optional but recommended) Clean up the JSON file so it doesn't clutter your folder
+    # os.remove(output_json_path)
+
+    return lyrics_data
+
+    
 
     
 
@@ -243,3 +272,6 @@ if __name__ == "__main__":
 
     print("LYRICS TEST")
     bn.split_song_tracks()
+
+    lyrics = bn.get_lyrics()
+    print(lyrics)
