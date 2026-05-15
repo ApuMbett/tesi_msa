@@ -2,7 +2,9 @@ from BeatNet.BeatNet import BeatNet
 import numpy as np
 from collections import Counter
 import librosa
-
+import os
+import subprocess
+AUDIO_DIR = "../data/raw_audio/"
 class DSPManager:
   """
     Wrapper around BeatNet to extract beat grid information and convert it to a format suitable for our application. This class can be initialized with either raw BeatNet output or an audio file path, and provides methods to retrieve the full beat grid, downbeats, pixel boundaries for blocks of bars, and both global and local BPM estimates. 
@@ -14,7 +16,9 @@ class DSPManager:
     # loading the track into memory using librosa, useful for low level DSP features computing 
     self.sr = 22050  # Standard sampling rate for audio processing
     self.y = None 
-    self.y, self.sr = librosa.load(audio_path, sr=self.sr)    
+    self.y, self.sr = librosa.load(audio_path, sr=self.sr)
+    self.audio_path = audio_path
+    self.track_name = audio_path.split("/")[-1].split(".")[0]    
 
   @staticmethod
   def _compute_raw_data(audio_path):
@@ -176,6 +180,38 @@ class DSPManager:
         "HER": round(float(her), 4)
     }
 
+  def split_song_tracks(self):
+    # this method splits the song into vocal and instrumental tracks using Demucs. 
+    if not self.has_splitted_tracks():
+      # run demucs and save the vocal and instrumental tracks in memory for later use.
+      print(f"[Demucs] Extracting vocals for {self.audio_path}...")
+
+      command = ["demucs", "--two-stems=vocals", "-o", AUDIO_DIR, self.audio_path]
+      subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
+  
+  def has_splitted_tracks(self):
+    # this method checks if the song has already been splitted into vocal and instrumental tracks, to avoid doing it multiple times. 
+    expected_vocal_path = os.path.join(AUDIO_DIR, "htdemucs", self.track_name, "vocals.wav")
+    
+    if os.path.exists(expected_vocal_path):
+        return True
+    else:
+      return False
+
+  def get_lyrics(self):
+    # then runs RMS-VAD on the vocal track of the song and uses WhisperX to get the lyrics. 
+    # The output is the timestamps of the lyrics, word by word.
+
+    # 1. split the song into vocals and instrumental using demucs
+
+    
+
+    pass 
+  def compute_vocal_features(self, start_time_ms, end_time_ms):
+    # this method calculates vocal_confidence, vocal_presence, start_BVR and end_BVR for the interval. 
+    # it does this on the vocal_track of the song  
+
+    pass
 if __name__ == "__main__":
     print("started beatnet wrapper test")
     # resolve path 
@@ -204,3 +240,6 @@ if __name__ == "__main__":
         print(f"Token {i}: BPM={bpm}")
     
     print("Median BPM across tokens:", np.median(bpms))
+
+    print("LYRICS TEST")
+    bn.split_song_tracks()

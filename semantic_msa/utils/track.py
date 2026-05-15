@@ -119,6 +119,7 @@ class Track:
           dsp_features.update(self.dsp_manager.compute_low_level_dsp_features(start_time_ms, end_time_ms)) 
 
         # TODO captioning 
+        # TODO lyrics and vocal features
         token = Token(i, start_time_ms, end_time_ms, is_mixable, dsp_features, start_cue = start_cue, end_cue = end_cue)
         tokens.append(token)
 
