@@ -210,7 +210,6 @@ class DSPManager:
 
     # 2. run WhisperX on the vocal track with custom VAD (RMS-VAD, Syed et al) to get the lyrics with timestamps. 
     # 2. Load the main Whisper into memory 
-    # TODO (will inject RMS-VAD later)
     # i run it as a subprocess because it's easier to manage the dependencies 
     output_json_path = f"../data/json_db/{self.track_name}/_whisper_output.json"
     if not os.path.exists(output_json_path):
