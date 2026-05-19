@@ -5,8 +5,13 @@ import librosa
 import os
 import subprocess
 import json
+from pathlib import Path
 
-AUDIO_DIR = "../data/raw_audio/"
+BASE_DIR = Path(__file__).resolve().parent  # semantic_msa/utils
+SEMANTIC_MSA_DIR = BASE_DIR.parent
+REPO_ROOT = SEMANTIC_MSA_DIR.parent
+DATA_DIR = REPO_ROOT / "data"
+AUDIO_DIR = DATA_DIR / "raw_audio"
 class DSPManager:
   """
     Wrapper around BeatNet to extract beat grid information and convert it to a format suitable for our application. This class can be initialized with either raw BeatNet output or an audio file path, and provides methods to retrieve the full beat grid, downbeats, pixel boundaries for blocks of bars, and both global and local BPM estimates. 
@@ -188,17 +193,13 @@ class DSPManager:
       # run demucs and save the vocal and instrumental tracks in memory for later use.
       print(f"[Demucs] Extracting vocals for {self.audio_path}...")
 
-      command = ["demucs", "--two-stems=vocals", "-o", AUDIO_DIR, self.audio_path]
+      command = ["demucs", "--two-stems=vocals", "-o", str(AUDIO_DIR), self.audio_path]
       subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
   
   def has_splitted_tracks(self):
     # this method checks if the song has already been splitted into vocal and instrumental tracks, to avoid doing it multiple times. 
-    expected_vocal_path = os.path.join(AUDIO_DIR, "htdemucs", self.track_name, "vocals.wav")
-    
-    if os.path.exists(expected_vocal_path):
-        return True
-    else:
-      return False
+    expected_vocal_path = AUDIO_DIR / "htdemucs" / self.track_name / "vocals.wav"
+    return expected_vocal_path.exists()
 
   #TODO don't know if this is the right place for these methods but for now it's easier to implement them here since they are related to the DSP features of the track, we can refactor later if needed.
   def get_lyrics(self):
@@ -211,30 +212,23 @@ class DSPManager:
     # 2. run WhisperX on the vocal track with custom VAD (RMS-VAD, Syed et al) to get the lyrics with timestamps. 
     # 2. Load the main Whisper into memory 
     # i run it as a subprocess because it's easier to manage the dependencies 
-    output_json_path = f"../data/json_db/{self.track_name}/_whisper_output.json"
-    if not os.path.exists(output_json_path):
-      vocal_path = os.path.join(AUDIO_DIR, "htdemucs", self.track_name, "vocals.wav")
-      whisper_env_python = "../whisper_engine/.venv/bin/python"  # Path to the Python executable in the whisper environment
-      command = [whisper_env_python, "../whisper_engine/whisper_wrapper.py", vocal_path]
+    output_json_path = DATA_DIR / "json_db" / self.track_name / "_whisper_output.json"
+    if not output_json_path.exists():
+      vocal_path = AUDIO_DIR / "htdemucs" / self.track_name / "vocals.wav"
+      whisper_env_python = REPO_ROOT / "whisper_engine" / ".venv" / "bin" / "python"  # Path to the Python executable in the whisper environment
+      whisper_wrapper = REPO_ROOT / "whisper_engine" / "whisper_wrapper.py"
+      command = [str(whisper_env_python), str(whisper_wrapper), str(vocal_path)]
       subprocess.run(command, check=True, )
       # Read the JSON file left behind by the bridge script
       print("Transcription complete. Ingesting timestamp data...")
-      if not os.path.exists(output_json_path):
+      if not output_json_path.exists():
           raise FileNotFoundError("WhisperX finished, but no JSON output was found!")
 
     with open(output_json_path, "r", encoding="utf-8") as f:
         lyrics_data = json.load(f)
 
-    # 4. (Optional but recommended) Clean up the JSON file so it doesn't clutter your folder
-    # os.remove(output_json_path)
-
     return lyrics_data
 
-    
-
-    
-
-    pass 
   def compute_vocal_features(self, start_time_ms, end_time_ms):
     # this method calculates vocal_confidence, vocal_presence, start_BVR and end_BVR for the interval. 
     # it does this on the vocal_track of the song  
@@ -243,9 +237,9 @@ class DSPManager:
 if __name__ == "__main__":
     print("started beatnet wrapper test")
     # resolve path 
-    path = "../data/raw_audio/shotmedown.mp3"
+    path = DATA_DIR / "raw_audio" / "shotmedown.mp3"
 
-    bn = DSPManager(audio_path = path)
+    bn = DSPManager(audio_path = str(path))
 
     print("full grid:", bn.get_full_grid())
     print("downbeats:", bn.get_downbeats())
@@ -273,4 +267,5 @@ if __name__ == "__main__":
     bn.split_song_tracks()
 
     lyrics = bn.get_lyrics()
-    print(lyrics)
+    for word in lyrics["word_segments"]:
+      print(word)

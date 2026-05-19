@@ -1,8 +1,13 @@
 from dsp_manager import DSPManager
 from cue_point import RawCuePoint, SnappedCuePoint
 import json
+from pathlib import Path
+HIGH_MEDIAN_SCORE = 0.8
+HIGH_MIN_SCORE = 0.6
+LOW_MEDIAN_SCORE = 0.5
+LOW_MIN_SCORE = 0.2
 class Token: 
-  def __init__(self, index, start_time_ms, end_time_ms, is_mixable, dsp_features, start_cue = None, end_cue = None):
+  def __init__(self, index, start_time_ms, end_time_ms, is_mixable, dsp_features, lyrics, start_cue = None, end_cue = None):
     self.index = index
     self.start_time_ms = start_time_ms
     self.end_time_ms = end_time_ms
@@ -12,11 +17,45 @@ class Token:
 
     self.caption = None # TODO this will be generated later by the captioning model, it's not important for now
     self.dsp_features = dsp_features # TODO this will hold the dsp features for the token, such as bpm, key, energy, etc. we can compute these later using the beatnet wrapper and other tools. it's not important for now
+    self.lyrics = lyrics
+
   
   def get_audio_segment(self):
     # TODO this will return the audio segment corresponding to the token, pydub to do this. it's not important for now
     pass
   
+  def _get_lyrics_LLM_representation(self):
+    if self.lyrics:
+      words = self.lyrics["words"]
+      # we preprocess lyrics for LLM token economy.
+      text_lyrics = " ".join([word["word"] for word in words])
+      # if a word spans across token boundaries, we add a special token to indicate that the word bleeds into the next token.
+      if words[-1]["end"] * 1000 > self.end_time_ms:
+        bleed_ms = int(words[-1]["end"] * 1000 - self.end_time_ms)
+        text_lyrics += f" <BLEED {bleed_ms}>"
+
+      # we save the start and the end time of the lyrics. useful because there could be instrumental padding useful for the mix
+      start = int(words[0]["start"] * 1000)
+      end = int(words[-1]["end"] * 1000) # <-- the LLM can see that the word spans across the token boundary also by looking at the end time.
+
+      # we add confidence scores for the lyrics
+      if self.lyrics["median_score"] < LOW_MEDIAN_SCORE or self.lyrics["min_score"] < LOW_MIN_SCORE:
+        reliability_tag = "LOW (Hallucination Risk)"
+      elif self.lyrics["median_score"] >= HIGH_MEDIAN_SCORE and self.lyrics["min_score"] >= HIGH_MIN_SCORE:
+        reliability_tag = "HIGH"
+      else:
+        reliability_tag = "MEDIUM"
+
+      return {
+        "text": text_lyrics,
+        "start_time_ms": start,
+        "end_time_ms": end,
+        "reliability": reliability_tag
+      }
+      
+
+
+
   def json(self):
     return {
       "index": self.index,
@@ -27,6 +66,7 @@ class Token:
       "end_cue": self.end_cue.json() if self.end_cue else None,
       "caption": self.caption,
       "dsp_features": self.dsp_features,
+      "lyrics": self._get_lyrics_LLM_representation() if self.lyrics else None
     }
 class Track:
   def __init__(self, path, name, author, beats_per_token = 16, structural_penalty_weight = 0.5):
@@ -48,16 +88,19 @@ class Track:
     self._compute_snapped_cue_points(structural_penalty_weight = structural_penalty_weight)
     self.duration_ms = self.dsp_manager.beats[-1][0]
 
-
+    self.lyrics = self.dsp_manager.get_lyrics()
+    
     self.tokens = self._build_token_map()
 
 
   def _compute_raw_cue_points(self) -> list[RawCuePoint]:
     # TODO: call cue-detr, we just read it from a json file for now.
     #debug: print full path 
-    import os 
-    print("Reading cue points from:", os.path.abspath("../../../cue-detr/tracks/_cue_points.json"))
-    with open("../externals/cue-detr/tracks/_cue_points.json", "r") as f:
+    base_dir = Path(__file__).resolve().parent  # semantic_msa/utils
+    semantic_msa_dir = base_dir.parent
+    cue_points_path = semantic_msa_dir / "externals" / "cue-detr" / "tracks" / "_cue_points.json"
+    print("Reading cue points from:", cue_points_path)
+    with open(cue_points_path, "r") as f:
 
       data = json.load(f)
       shotmedown_cues = data[self.name] #! not exactly but now we just assume that name includes the extension
@@ -111,6 +154,21 @@ class Track:
         # Determine if the token contains any snapped cue points and if so, check if they are at the start or the end of the token. 
         start_cue, end_cue = self._determine_token_cues(start_time_ms, end_time_ms)
 
+        # Map lyrics to the token based on the token boundaries. we assign to the token all the words that are in the token boundaries.
+        token_lyrics = self._map_lyrics_to_token(start_time_ms, end_time_ms)
+
+        # calculate median and minimum word score for the token lyrics.
+        if token_lyrics:
+          word_scores = [word["score"] for word in token_lyrics]
+          lyrics_median_score = sorted(word_scores)[len(word_scores) // 2]  # median
+          lyrics_min_score = min(word_scores)
+          token_lyrics = {
+            "words": token_lyrics,
+            "median_score": lyrics_median_score,
+            "min_score": lyrics_min_score
+          }
+          # low min score but high median means that there are some hallucinated words for example
+
         # TODO DSP features
         dsp_features = {}
         if is_mixable:
@@ -120,7 +178,7 @@ class Track:
 
         # TODO captioning 
         # TODO lyrics and vocal features
-        token = Token(i, start_time_ms, end_time_ms, is_mixable, dsp_features, start_cue = start_cue, end_cue = end_cue)
+        token = Token(i, start_time_ms, end_time_ms, is_mixable, dsp_features, token_lyrics, start_cue = start_cue, end_cue = end_cue)
         tokens.append(token)
 
     # fix pad bpm 
@@ -153,13 +211,26 @@ class Track:
             end_cue = cue
     
     return start_cue, end_cue
+  
+  def _map_lyrics_to_token(self, start_time_ms, end_time_ms):
+    # this method maps the lyrics to the tokens. if a word STARTS in the token boundaries, we assign it to the token.
+    # we do this because we want to keep also words that span across token boundaries. 
+    words = self.lyrics["word_segments"]
+    token_lyrics = [word for word in words if start_time_ms <= word["start"] * 1000 < end_time_ms]  # convert to ms and check if it falls within the token boundaries
+    
+    return token_lyrics
+    
+
+    
 
 
 
 if __name__ == "__main__":
 
   filename = "shotmedown.mp3"
-  track = Track(path = "../../data/raw_audio/" + filename, name = filename, author = "unknown")
+  repo_root = Path(__file__).resolve().parent.parent.parent
+  audio_path = repo_root / "data" / "raw_audio" / filename
+  track = Track(path = str(audio_path), name = filename, author = "unknown")
   print("\n\n\n\n############ BEST ##############")
   print("Best phase offset (in beats):", track.best_phase_offset)
   print("Mean score for best phase offset:", track.mean_score)
