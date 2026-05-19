@@ -2,10 +2,13 @@ from dsp_manager import DSPManager
 from cue_point import RawCuePoint, SnappedCuePoint
 import json
 from pathlib import Path
+import subprocess
+import sys
 HIGH_MEDIAN_SCORE = 0.8
 HIGH_MIN_SCORE = 0.6
 LOW_MEDIAN_SCORE = 0.5
 LOW_MIN_SCORE = 0.2
+CUE_DETR_SENSITIVITY = 0.85
 class Token: 
   def __init__(self, index, start_time_ms, end_time_ms, is_mixable, dsp_features, lyrics, start_cue = None, end_cue = None):
     self.index = index
@@ -94,19 +97,56 @@ class Track:
 
 
   def _compute_raw_cue_points(self) -> list[RawCuePoint]:
-    # TODO: call cue-detr, we just read it from a json file for now.
-    #debug: print full path 
     base_dir = Path(__file__).resolve().parent  # semantic_msa/utils
     semantic_msa_dir = base_dir.parent
-    cue_points_path = semantic_msa_dir / "externals" / "cue-detr" / "tracks" / "_cue_points.json"
-    print("Reading cue points from:", cue_points_path)
-    with open(cue_points_path, "r") as f:
+    repo_root = semantic_msa_dir.parent
 
-      data = json.load(f)
-      shotmedown_cues = data[self.name] #! not exactly but now we just assume that name includes the extension
+    cue_detr_dir = semantic_msa_dir / "externals" / "cue-detr"
+    cue_detr_script = cue_detr_dir / "cue_points_single_track.py"
+    track_folder = Path(self.name).stem
+    cue_points_path = repo_root / "data" / "json_db" / track_folder / "_cue_points.json"
 
-      # note: the cue points in the json file are in seconds, we need to convert them to milliseconds for the RawCuePoint class and i don't know if this is the right precision 
-      return [RawCuePoint(time_ms = int(cue["time"]*1000), score = cue["score"]) for cue in shotmedown_cues]
+    def _load_cue_payload(path: Path):
+      with open(path, "r") as f:
+        data = json.load(f)
+      if isinstance(data, dict):
+        return data.get("sensitivity"), data.get("cue_points", [])
+      return None, data
+
+    cue_points = []
+    saved_sensitivity = None
+
+    if cue_points_path.exists():
+        print(f"Cue points already exist for {self.name}, loading from {cue_points_path}")
+        saved_sensitivity, cue_points = _load_cue_payload(cue_points_path)
+        print("Cue points loaded successfully.")
+
+    if saved_sensitivity != CUE_DETR_SENSITIVITY:
+        if saved_sensitivity is not None:
+            print(
+                f"Cue points for {self.name} were computed with a different sensitivity "
+                f"({saved_sensitivity}) than the current one ({CUE_DETR_SENSITIVITY})."
+            )
+            print("Recomputing cue points with the current sensitivity...")
+        
+        cue_points_path.parent.mkdir(parents=True, exist_ok=True)
+        cue_detr_python = cue_detr_dir / ".venv" / "bin" / "python"
+        subprocess.run(
+            [
+                str(cue_detr_python),
+                str(cue_detr_script),
+                "--track-name",
+                self.name,
+                "--sensitivity",
+                str(CUE_DETR_SENSITIVITY),
+            ],
+            check=True,
+        )
+        _, cue_points = _load_cue_payload(cue_points_path)
+        print("Cue points computed and saved successfully.")
+
+    # note: the cue points in the json file are in seconds, we need to convert them to milliseconds for the RawCuePoint class
+    return [RawCuePoint(time_ms = int(cue["time"] * 1000), score = cue["score"]) for cue in cue_points]
     
 
   def _compute_snapped_cue_points(self, structural_penalty_weight = 0.5) -> list[SnappedCuePoint]:
@@ -227,7 +267,7 @@ class Track:
 
 if __name__ == "__main__":
 
-  filename = "shotmedown.mp3"
+  filename = "satisfaction.mp3"
   repo_root = Path(__file__).resolve().parent.parent.parent
   audio_path = repo_root / "data" / "raw_audio" / filename
   track = Track(path = str(audio_path), name = filename, author = "unknown")
