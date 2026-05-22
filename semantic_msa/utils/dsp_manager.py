@@ -6,6 +6,7 @@ import os
 import subprocess
 import json
 from pathlib import Path
+from scipy.stats import pearsonr
 
 BASE_DIR = Path(__file__).resolve().parent  # semantic_msa/utils
 SEMANTIC_MSA_DIR = BASE_DIR.parent
@@ -26,6 +27,7 @@ class DSPManager:
     self.y, self.sr = librosa.load(audio_path, sr=self.sr)
     self.audio_path = audio_path
     self.track_name = audio_path.split("/")[-1].split(".")[0]    
+    
 
   @staticmethod
   def _compute_raw_data(audio_path):
@@ -125,16 +127,22 @@ class DSPManager:
       
       return round(bpm, 1) # Rounds to a clean decimal like 128.0
 
+  # TODO: compute vocal_confidence, vocal_presence, start_BVR and end_BVR on vocal track
+
   def compute_low_level_dsp_features(self, start_time_ms, end_time_ms):
     # TODO this is temporary but i just need it to see if it works, i will investigate later for better features for our purposes 
     # 1. Convert milliseconds to array indices
     start_sample = int(start_time_ms * self.sr / 1000)
     end_sample = int(end_time_ms * self.sr / 1000)
     
-    # 2. Slice the audio array for this specific token
+    # 2. get the splitted vocal and instrumental tracks.
+    y_vocal, y_instrumental = self._get_y_splitted()
+    # 3. Slice the audio array for this specific token
     y_token = self.y[start_sample:end_sample]
+    y_token_vocal = y_vocal[start_sample:end_sample]
+    y_token_instrumental = y_instrumental[start_sample:end_sample]
     
-    # --- THE REST OF THE PERPLEXITY SOTA MATH ---
+    # compute "ROE", "BTR","MTR","TTR","SC","MSF","SF","OCN","EV" on original master
     S = np.abs(librosa.stft(y_token))
     rms_env = librosa.feature.rms(S=S)[0]
     total_rms_mean = np.mean(rms_env) + 1e-6
@@ -151,9 +159,9 @@ class DSPManager:
     mid_rms = np.sqrt(np.mean(S[mid_mask, :]**2, axis=0))
     treb_rms = np.sqrt(np.mean(S[treb_mask, :]**2, axis=0))
 
-    raw_bass = np.mean(np.sqrt(np.mean(S[bass_mask, :]**2, axis=0)))
-    raw_mid = np.mean(np.sqrt(np.mean(S[mid_mask, :]**2, axis=0)))
-    raw_treb = np.mean(np.sqrt(np.mean(S[treb_mask, :]**2, axis=0)))
+    raw_bass = np.mean(bass_rms)
+    raw_mid = np.mean(mid_rms)
+    raw_treb = np.mean(treb_rms)
     # normalize between 0 and 1
     total_band_energy = raw_bass + raw_mid + raw_treb + 1e-6
     
@@ -171,8 +179,12 @@ class DSPManager:
     ocn = len(onsets)
     ev = np.var(rms_env)
     
-    S_harmonic, S_percussive = librosa.decompose.hpss(S)
-    her = np.mean(librosa.feature.rms(S=S_harmonic)) / total_rms_mean
+    # Compute HER on instrumental track
+    y_instrumental_harmonic, _ = self._get_instrumental_hpss()
+    S_harmonic_instrumental = np.abs(librosa.stft(y_instrumental_harmonic[start_sample:end_sample]))
+    her = np.mean(librosa.feature.rms(S=S_harmonic_instrumental)) / total_rms_mean
+
+    # TODO compute vocal_confidence, vocal_presence, start_BVR and end_BVR on vocal track
 
     return {
         "ROE": round(float(roe), 4),
@@ -186,6 +198,109 @@ class DSPManager:
         "EV": round(float(ev), 4),
         "HER": round(float(her), 4)
     }
+  
+
+
+  def compute_camelot_key(self, start_time_ms: float, end_time_ms: float) -> str:
+    """
+    Computes the musical key of a specific audio segment instrumental track and returns its Camelot Wheel equivalent.
+    Assumes self.y (the audio array) and self.sr (sample rate) are already loaded in the class.
+    """
+    # 1. Convert milliseconds to audio samples
+    start_sample = int((start_time_ms / 1000.0) * self.sr)
+    end_sample = int((end_time_ms / 1000.0) * self.sr)
+    
+    # 2. Extract the Chromagram (Pitch Class Profile)
+    # y_harmonic isolates the tonal elements from the percussive transients
+    y_harmonic, _ = self._get_instrumental_hpss()
+    y_harmonic = y_harmonic[start_sample:end_sample]
+    if len(y_harmonic) == 0:
+        return "Unknown"
+
+
+    chromagram = librosa.feature.chroma_cqt(y=y_harmonic, sr=self.sr)
+    
+    # Sum the chroma features over time to get the dominant 12 pitch classes
+    chroma_sum = np.sum(chromagram, axis=1)
+    
+    # 3. Define the Krumhansl-Schmuckler Key Profiles
+    # These represent the statistical distribution of notes in Major and Minor scales
+    maj_profile = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
+    min_profile = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
+
+    # Note names corresponding to the 12 chroma bins (C, C#, D, D#, E, F, F#, G, G#, A, A#, B)
+    notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+    
+    # The ultimate Camelot mapping dictionary
+    camelot_map = {
+        'C Major': '8B', 'A Minor': '8A',
+        'G Major': '9B', 'E Minor': '9A',
+        'D Major': '10B', 'B Minor': '10A',
+        'A Major': '11B', 'F# Minor': '11A',
+        'E Major': '12B', 'C# Minor': '12A',
+        'B Major': '1B', 'G# Minor': '1A',
+        'F# Major': '2B', 'D# Minor': '2A',
+        'C# Major': '3B', 'A# Minor': '3A',
+        'G# Major': '4B', 'F Minor': '4A',
+        'D# Major': '5B', 'C Minor': '5A',
+        'A# Major': '6B', 'G Minor': '6A',
+        'F Major': '7B', 'D Minor': '7A'
+    }
+
+    best_corr = -1.0
+    best_key = ""
+
+    # 4. Template Matching via Pearson Correlation
+    for i in range(12):
+        # Rotate the profiles through all 12 root notes
+        rotated_maj = np.roll(maj_profile, i)
+        rotated_min = np.roll(min_profile, i)
+
+        # Correlate the audio's chromagram with the Major template
+        corr_maj, _ = pearsonr(chroma_sum, rotated_maj)
+        if corr_maj > best_corr:
+            best_corr = corr_maj
+            best_key = f"{notes[i]} Major"
+
+        # Correlate the audio's chromagram with the Minor template
+        corr_min, _ = pearsonr(chroma_sum, rotated_min)
+        if corr_min > best_corr:
+            best_corr = corr_min
+            best_key = f"{notes[i]} Minor"
+
+    # 5. Translate the standard key to Camelot
+    return camelot_map.get(best_key, "Unknown")
+  
+  def _get_instrumental_hpss(self):
+    """
+    Lazy evaluation for HPSS on the Instrumental track ONLY.
+    Calculates the entire track once and caches it.
+    """
+    if not hasattr(self, '_y_inst_harmonic') or self._y_inst_harmonic is None:
+        # 1. Make sure we have the stems loaded
+        _, y_inst = self._get_y_splitted()
+        
+        # 2. Run the heavy math on the full instrumental track
+        self._y_inst_harmonic, self._y_inst_percussive = librosa.effects.hpss(y_inst)
+        
+    return self._y_inst_harmonic, self._y_inst_percussive
+
+  def _get_y_splitted(self):
+    # lazy evaluation for the splitted vocal and instrumental tracks, since we need them in multiple places and we don't want to run demucs multiple times. 
+    if hasattr(self, '_y_vocal') and self._y_vocal is not None:
+      return self._y_vocal, self._y_instrumental
+    
+    if not self.has_splitted_tracks():
+      self.split_song_tracks()
+
+    vocal_path = AUDIO_DIR / "htdemucs" / self.track_name / "vocals.wav"
+    instrumental_path = AUDIO_DIR / "htdemucs" / self.track_name / "no_vocals.wav"
+    self._y_vocal, _ = librosa.load(vocal_path, sr=self.sr)
+    self._y_instrumental, _ = librosa.load(instrumental_path, sr=self.sr)
+    
+    # 4. Return the cached arrays
+    return self._y_vocal, self._y_instrumental
+
 
   def split_song_tracks(self):
     # this method splits the song into vocal and instrumental tracks using Demucs. 
@@ -230,7 +345,7 @@ class DSPManager:
     return lyrics_data
 
   def compute_vocal_features(self, start_time_ms, end_time_ms):
-    # this method calculates vocal_confidence, vocal_presence, start_BVR and end_BVR for the interval. 
+    #TODO this method calculates vocal_confidence, vocal_presence, start_BVR and end_BVR for the interval. 
     # it does this on the vocal_track of the song  
 
     pass

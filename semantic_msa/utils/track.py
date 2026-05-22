@@ -27,6 +27,14 @@ class Token:
     # TODO this will return the audio segment corresponding to the token, pydub to do this. it's not important for now
     pass
   
+
+  # TODO
+  def _get_DSP_features_LLM_representation(self):
+     pass
+  # TODO  
+  def _get_cue_data_LLM_representation(self):
+     # just a placeholder. move it into cue_point.py
+     pass
   def _get_lyrics_LLM_representation(self):
     if self.lyrics:
       words = self.lyrics["words"]
@@ -94,6 +102,8 @@ class Track:
     self.lyrics = self.dsp_manager.get_lyrics()
     
     self.tokens = self._build_token_map()
+    self.key = self.dsp_manager.compute_camelot_key(0, self.duration_ms)
+    self.bpm = None #TODO PLACEHOLDER
 
 
   def _compute_raw_cue_points(self) -> list[RawCuePoint]:
@@ -259,6 +269,30 @@ class Track:
     token_lyrics = [word for word in words if start_time_ms <= word["start"] * 1000 < end_time_ms]  # convert to ms and check if it falls within the token boundaries
     
     return token_lyrics
+
+  def json(self):
+    return {
+      "path": self.path,
+      "name": self.name,
+      "author": self.author,
+      "key": self.key,
+      "duration_ms": self.duration_ms,
+      "best_phase_offset": self.best_phase_offset,
+      "mean_score": self.mean_score,
+      "token_boundaries": self.token_boundaries,
+      "snapped_cues": [cue.json() for cue in self.snapped_cues],
+      "tokens": [token.json() for token in self.tokens]
+    }
+  
+  def LLM_representation(self):
+     return{
+        "name": self.name,
+        "author": self.author,
+        "duration_ms": self.duration_ms,
+        "key": self.key,
+        "bpm": self.bpm,
+        "tokens": [token.json() for token in self.tokens]
+     }
     
 
     
@@ -267,7 +301,7 @@ class Track:
 
 if __name__ == "__main__":
 
-  filename = "satisfaction.mp3"
+  filename = "shotmedown.mp3"
   repo_root = Path(__file__).resolve().parent.parent.parent
   audio_path = repo_root / "data" / "raw_audio" / filename
   track = Track(path = str(audio_path), name = filename, author = "unknown")
@@ -282,3 +316,11 @@ if __name__ == "__main__":
   print("\n\n\n\n############ TOKENS ##############")
   for token in track.tokens:
       print(json.dumps(token.json(), indent = 4))
+
+
+
+  print("\n\n\n\n############ FULL TRACK JSON ##############")
+  print(json.dumps(track.json(), indent = 4))
+
+  print("\n\n\n\n############ LLM REPRESENTATION ##############")
+  print(json.dumps(track.LLM_representation(), indent = 4))
