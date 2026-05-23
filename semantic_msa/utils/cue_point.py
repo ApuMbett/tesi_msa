@@ -19,14 +19,16 @@ class RawCuePoint:
           "confidence_score": self.score,
         }
 
-
+STRUCTURAL_PENALTY_WEIGHT = 0.5 
+PSYCHOACUSTIC_THRESHOLD_MS = 50 # This threshold is based on psychoacoustic research on temporal perception in music. [TODO - find source for this threshold]
 from dsp_manager import DSPManager
+from pathlib import Path
 class SnappedCuePoint:
     """
     Represents a cue point after snapping to the nearest downbeat in the beat grid.
     This class encapsulates the structural alignment process and the evaluation of the cue point's reliability based on psychoacoustic thresholds (taking bpm into account).
     """
-    def __init__(self, raw_cue_point: RawCuePoint, beat_grid: DSPManager, downbeat_offset_to_skip = 0, structural_penalty_weight = 0.5):
+    def __init__(self, raw_cue_point: RawCuePoint, beat_grid: DSPManager, downbeat_offset_to_skip = 0, structural_penalty_weight = STRUCTURAL_PENALTY_WEIGHT):
 
         if beat_grid.beats is None:
             raise ValueError("Beat grid must be computed before snapping cue points.")
@@ -35,6 +37,7 @@ class SnappedCuePoint:
         self.structural_penalty_weight = structural_penalty_weight # this weight determines how much the quantization error ratio will affect the final score, allowing for tuning based on how strict we want to be about structural alignment versus raw confidence. between 0 and 1, where 0 means no penalty and 1 means full penalty based on the quantization error ratio. when 1 the structural alignment has maximum importance, when 0 the raw confidence score has maximum importance.
         
         # Snap the raw cue point to the nearest downbeat in the grid
+        self.downbeat_offset_to_skip = downbeat_offset_to_skip # this is the offset in number of downbeats to skip when getting the token boundaries for snapping. it can happen that cue points are at some offset from the first downbeat, we can use this parameter to skip the first n downbeats when getting the token boundaries to get minimum QER 
         token_boundaries = beat_grid.get_semantic_audio_token_boundaries(downbeat_offset_to_skip = downbeat_offset_to_skip)
         self._snap_to_downbeat(token_boundaries)
 
@@ -69,7 +72,7 @@ class SnappedCuePoint:
         
         return round(adjusted_score, 3)
 
-    def _calculate_quantization_error_ratio(self, beat_grid: DSPManager, threshold_ms=50) -> float:
+    def _calculate_quantization_error_ratio(self, beat_grid: DSPManager, threshold_ms=PSYCHOACUSTIC_THRESHOLD_MS) -> float:
         """
         Calculates the Quantization Error Ratio, which is the ratio of the cue point's displacement error to the maximum forgivable error based on the track's local BPM.
         This ratio is crucial for evaluating the reliability of the cue point and adjusting the AI's confidence score accordingly.
@@ -80,7 +83,7 @@ class SnappedCuePoint:
         """
 
         #find start and end indexes of times in beat_grid for the token that contains the cue point
-        token_boundaries = beat_grid.get_semantic_audio_token_boundaries()
+        token_boundaries = beat_grid.get_semantic_audio_token_boundaries(self.downbeat_offset_to_skip)
 
         # we need to calculate the local bpm for the token that contains the cue point. 
         # so we need to find the start and end times of the token that contains the cue point, and then calculate the bpm for that token.
@@ -111,7 +114,7 @@ class SnappedCuePoint:
         
         
 
-        # Full confidence for errors within threshold_ms ms, as they are generally imperceptible in a DJ mix context, regardless of BPM. This threshold is based on psychoacoustic research on temporal perception in music. [TODO - find source for this threshold]
+        # Full confidence for errors within threshold_ms ms, as they are generally imperceptible in a DJ mix context, regardless of BPM. 
         # 1. Apply the threshold_ms ms "Deadzone" (anything under threshold_ms  becomes 0)
         effective_error = max(0.0, self.error - threshold_ms )
         
@@ -139,39 +142,39 @@ class SnappedCuePoint:
 
 
 if __name__ == "__main__":
-  # demo, reads the cue points from a json file 
+    # demo, reads the cue points from a json file
     song = "blablabla.mp3"
     import json
-    with open("../../cue-detr/tracks/_cue_points.json", "r") as f:
-        #debug: print full path 
-        import os 
-        print("Reading cue points from:", os.path.abspath("../../cue-detr/tracks/_cue_points.json"))
+    base_dir = Path(__file__).resolve().parent
+    semantic_msa_dir = base_dir.parent
+    cue_points_path = semantic_msa_dir / "externals" / "cue-detr" / "tracks" / "_cue_points.json"
+    with open(cue_points_path, "r") as f:
+        print("Reading cue points from:", cue_points_path)
         data = json.load(f)
         shotmedown_cues = data[song]
 
-        # note: the cue points in the json file are in seconds, we need to convert them to milliseconds for the RawCuePoint class and i don't know if this is the right precision 
-        raw_cues = [RawCuePoint(time_ms = int(cue["time"]*1000), score = cue["score"]) for cue in shotmedown_cues]
+    # note: the cue points in the json file are in seconds, we need to convert them to milliseconds for the RawCuePoint class and i don't know if this is the right precision
+    raw_cues = [RawCuePoint(time_ms = int(cue["time"] * 1000), score = cue["score"]) for cue in shotmedown_cues]
 
-        print("Raw Cue Points:")
-        for cue in raw_cues:
-            print("Raw Cue Point:", cue.json())
+    print("Raw Cue Points:")
+    for cue in raw_cues:
+        print("Raw Cue Point:", cue.json())
 
-        #snap the raw cues to the beat grid
-        beat_grid = DSPManager(audio_path = "../data/raw_audio/"+song)
-        snapped_cues = [SnappedCuePoint(raw_cue, beat_grid) for raw_cue in raw_cues]
+    # snap the raw cues to the beat grid
+    repo_root = semantic_msa_dir.parent
+    audio_path = repo_root / "data" / "raw_audio" / song
+    beat_grid = DSPManager(audio_path = str(audio_path))
+    snapped_cues = [SnappedCuePoint(raw_cue, beat_grid) for raw_cue in raw_cues]
 
+    print("\nSnapped Cue Points:")
+    for snapped_cue in snapped_cues:
+        print("Snapped Cue Point:", snapped_cue.json())
 
-        print("\nSnapped Cue Points:")
-        for snapped_cue in snapped_cues:
-            print("Snapped Cue Point:", snapped_cue.json())
-
-
-        print("\nBoundaries for semantic audio tokens (blocks of bars):", beat_grid.get_semantic_audio_token_boundaries())
-        print("Global BPM:", beat_grid.compute_global_bpm())
-        print("BPM for each 16-beat token: ")
-        for i in range(len(beat_grid.get_semantic_audio_token_boundaries())-1
-            ):
-            start_time = beat_grid.get_semantic_audio_token_boundaries()[i]
-            end_time = beat_grid.get_semantic_audio_token_boundaries()[i+1]
-            bpm = beat_grid._compute_token_bpm(start_time, end_time)
-            print(f"Token {i}: Start={start_time}ms, End={end_time}ms, BPM={bpm}")
+    print("\nBoundaries for semantic audio tokens (blocks of bars):", beat_grid.get_semantic_audio_token_boundaries())
+    print("Global BPM:", beat_grid.compute_global_bpm())
+    print("BPM for each 16-beat token: ")
+    for i in range(len(beat_grid.get_semantic_audio_token_boundaries()) - 1):
+        start_time = beat_grid.get_semantic_audio_token_boundaries()[i]
+        end_time = beat_grid.get_semantic_audio_token_boundaries()[i + 1]
+        bpm = beat_grid._compute_token_bpm(start_time, end_time)
+        print(f"Token {i}: Start={start_time}ms, End={end_time}ms, BPM={bpm}")
