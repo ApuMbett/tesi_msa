@@ -77,6 +77,19 @@ class Token:
       "end_cue": self.end_cue.json() if self.end_cue else None,
       "caption": self.caption,
       "dsp_features": self.dsp_features,
+      "lyrics": self.lyrics
+    }
+  
+  def LLM_representation(self):
+    return {
+      "index": self.index,
+      "start_time_ms": self.start_time_ms,
+      "end_time_ms": self.end_time_ms,
+      "is_mixable": self.is_mixable,
+      "start_cue": self.start_cue.json() if self.start_cue else None,
+      "end_cue": self.end_cue.json() if self.end_cue else None,
+      "caption": self.caption,
+      "dsp_features": self.dsp_features,
       "lyrics": self._get_lyrics_LLM_representation() if self.lyrics else None
     }
 class Track:
@@ -91,8 +104,8 @@ class Track:
     # self.dsp_features["bpm"] = self.dsp_manager.compute_global_bpm()
 
     # when we compute the token boundaries we find the phase offset that maximizes the score. the cue points are snapped to downbeats in a way that the mean score is maximized.
-    self.best_phase_offset = None
-    self.mean_score = None
+    self.best_beat_phase_offset = None
+    self.mean_cue_score = None
     self.token_boundaries = []
     self.snapped_cues = []
 
@@ -101,9 +114,27 @@ class Track:
 
     self.lyrics = self.dsp_manager.get_lyrics()
     
+    self.vocal_density_threshold = self.dsp_manager._get_vocal_threshold()
+    self.vocal_confidence_steepness = self.dsp_manager._get_vocal_confidence_steepness()
     self.tokens = self._build_token_map()
+
     self.key = self.dsp_manager.compute_camelot_key(0, self.duration_ms)
     self.bpm = None #TODO PLACEHOLDER
+
+
+    # global vocal features 
+    edge_keys = (
+      "vocal_energy_dominance",
+      "vocal_intensity",
+      "vocal_confidence",
+      "vocal_density",
+    )
+    global_vocal = self.dsp_manager._compute_DSP_vocal_features(0, self.duration_ms)
+    self.global_vocal_features = {k: round(float(v), 4) for k, v in zip(edge_keys, global_vocal)} #TODO refactor this duplicated code. 
+    self.global_vocal_features["vocal_density_threshold"] =  round(self.vocal_density_threshold, 4)
+    self.global_vocal_features["vocal_confidence_steepness"] = round(self.vocal_confidence_steepness,4)
+    from dsp_manager import VOCAL_START_END_BAR_WINDOW
+    self.global_vocal_features["vocal_edge_window_bars"] = VOCAL_START_END_BAR_WINDOW
 
 
   def _compute_raw_cue_points(self) -> list[RawCuePoint]:
@@ -165,15 +196,15 @@ class Track:
         #! ^ this will be refactored later, snappedcuepoint should not take the whole beat grid as an argument now that the track class exists 
 
         # maximize the mean score across all snapped cues
-        mean_score = sum(cue.score for cue in snapped_cues) / len(snapped_cues)
-        if self.mean_score is None or mean_score > self.mean_score:
-            self.mean_score = mean_score
-            self.best_phase_offset = i
+        mean_cue_score = sum(cue.score for cue in snapped_cues) / len(snapped_cues)
+        if self.mean_cue_score is None or mean_cue_score > self.mean_cue_score:
+            self.mean_cue_score = mean_cue_score
+            self.best_beat_phase_offset = i
             self.snapped_cues = snapped_cues
             self.token_boundaries = self.dsp_manager.get_semantic_audio_token_boundaries(downbeat_offset_to_skip = i)
             #!^ problem: token boundaries now include tail and intro pad, this was necessary for completeness. now we can move this to the track class, this is necessary because (see blablabla) we have the micro intro pad that has 8000 bpm and so the qer is very high. even though it's few ms 
         
-        print(f"\n\n\n\n######## Phase offset {i}: mean score={mean_score} ########") 
+        print(f"\n\n\n\n######## Phase offset {i}: mean score={mean_cue_score} ########") 
         print(F"token boundaries={self.token_boundaries}") 
         print("Snapped Cue Points for this phase offset:")
         for snapped_cue in snapped_cues:
@@ -223,7 +254,6 @@ class Track:
         dsp_features = {}
         if is_mixable:
           # compute the bpm only if it's not a pad 
-          dsp_features["BPM"] = self.dsp_manager._compute_token_bpm(start_time_ms, end_time_ms)
           dsp_features.update(self.dsp_manager.compute_low_level_dsp_features(start_time_ms, end_time_ms)) 
 
         # TODO captioning 
@@ -277,8 +307,9 @@ class Track:
       "author": self.author,
       "key": self.key,
       "duration_ms": self.duration_ms,
-      "best_phase_offset": self.best_phase_offset,
-      "mean_score": self.mean_score,
+      "best_beat_phase_offset": self.best_beat_phase_offset,
+      "mean_cue_score": self.mean_cue_score,
+      "vocal_features": self.global_vocal_features,
       "token_boundaries": self.token_boundaries,
       "snapped_cues": [cue.json() for cue in self.snapped_cues],
       "tokens": [token.json() for token in self.tokens]
@@ -291,7 +322,7 @@ class Track:
         "duration_ms": self.duration_ms,
         "key": self.key,
         "bpm": self.bpm,
-        "tokens": [token.json() for token in self.tokens]
+        "tokens": [token.LLM_representation() for token in self.tokens]
      }
     
 
@@ -301,13 +332,13 @@ class Track:
 
 if __name__ == "__main__":
 
-  filename = "shotmedown.mp3"
+  filename = sys.argv[1]
   repo_root = Path(__file__).resolve().parent.parent.parent
   audio_path = repo_root / "data" / "raw_audio" / filename
   track = Track(path = str(audio_path), name = filename, author = "unknown")
   print("\n\n\n\n############ BEST ##############")
-  print("Best phase offset (in beats):", track.best_phase_offset)
-  print("Mean score for best phase offset:", track.mean_score)
+  print("Best phase offset (in beats):", track.best_beat_phase_offset)
+  print("Mean score for best phase offset:", track.mean_cue_score)
   print("Token boundaries (ms):", track.token_boundaries)
   print("Snapped Cue Points:")
   for snapped_cue in track.snapped_cues:
@@ -322,5 +353,19 @@ if __name__ == "__main__":
   print("\n\n\n\n############ FULL TRACK JSON ##############")
   print(json.dumps(track.json(), indent = 4))
 
+  track_folder = Path(filename).stem
+  full_json_path = repo_root / "data" / "json_db" / track_folder / "full.json"
+  full_json_path.parent.mkdir(parents=True, exist_ok=True)
+  with open(full_json_path, "w") as f:
+      json.dump(track.json(), f, indent=4)
+  print(f"Full track JSON saved to {full_json_path}")
+
+  
+
   print("\n\n\n\n############ LLM REPRESENTATION ##############")
   print(json.dumps(track.LLM_representation(), indent = 4))
+
+  LLM_json_path = repo_root / "data" / "json_db" / track_folder / "LLM.json"
+  with open(LLM_json_path, "w") as f:
+      json.dump(track.LLM_representation(), f, indent=4)
+  print(f"LLM representation JSON saved to {LLM_json_path}")

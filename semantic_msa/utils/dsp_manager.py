@@ -13,6 +13,23 @@ SEMANTIC_MSA_DIR = BASE_DIR.parent
 REPO_ROOT = SEMANTIC_MSA_DIR.parent
 DATA_DIR = REPO_ROOT / "data"
 AUDIO_DIR = DATA_DIR / "raw_audio"
+
+VOCAL_THRESHOLD_FLOOR = 0.10 #  # If it's a pure instrumental track, both centers will be tiny so We enforce a hard floor so it doesn't hallucinate vocals in the noise.
+#Without the floor: The algorithm might find a "noise center" at 0.01 and a "vocal center" at 0.04. It will calculate a threshold of 0.0175, and suddenly the random hiss of an old vinyl sample or a mastering artifact will be flagged as an active human vocalist.
+
+VOCAL_THRESHOLD_GEOMETRIC_BIAS = 0.25  # Bias the K-Means threshold towards the noise floor by this percentage, so between the noise floor centroid (if bias = 0.0) and the vocal dominance centroid (if bias = 1.0).
+
+VOCAL_CONFIDENCE_STEEPNESS = 20
+# This controls how sharply the vocal_confidence transitions from 0 to 1 around the vocal_density_threshold. A higher value means a more binary classification (closer to a step function), while a lower value creates a softer transition. from psychoacoustics categorical perception of vocal presence studies we know that a good value is between 20 and 30. This is used if we want a fixed steepness, in this code we calculate it dynamically in _get_vocal_confidence_steepness() 
+
+VOCAL_WINDOW_DURATION_SEC = 0.1  
+# WHY: 100ms is good for human speech. 
+# If the window is too small (< 20ms), the RMS math captures raw transient oscillations and triggers false positives on hi-hat or snare bleed. 
+# If the window is too large (> 300ms), short vocal chops, ad-libs, and quick breaths get mathematically diluted by the surrounding silence, causing false negatives. 
+# 100ms (0.1 seconds) perfectly encapsulates exactly one physical human phoneme (a single vowel or consonant sound).
+
+VOCAL_START_END_BAR_WINDOW = 1 # number of bars to consider at the start and at the end of the token to calculate the vocal features at the edges, which are useful to predict vocal clashes when mixing. we convert this value to ms later in compute_low_level_dsp_features() since it depends on the BPM of the token.
+
 class DSPManager:
   """
     Wrapper around BeatNet to extract beat grid information and convert it to a format suitable for our application. This class can be initialized with either raw BeatNet output or an audio file path, and provides methods to retrieve the full beat grid, downbeats, pixel boundaries for blocks of bars, and both global and local BPM estimates. 
@@ -127,7 +144,7 @@ class DSPManager:
       
       return round(bpm, 1) # Rounds to a clean decimal like 128.0
 
-  # TODO: compute vocal_confidence, vocal_presence, start_BVR and end_BVR on vocal track
+  # TODO: compute vocal_confidence, vocal_density, start_BVR and end_BVR on vocal track
 
   def compute_low_level_dsp_features(self, start_time_ms, end_time_ms):
     # TODO this is temporary but i just need it to see if it works, i will investigate later for better features for our purposes 
@@ -141,6 +158,8 @@ class DSPManager:
     y_token = self.y[start_sample:end_sample]
     y_token_vocal = y_vocal[start_sample:end_sample]
     y_token_instrumental = y_instrumental[start_sample:end_sample]
+
+    bpm = self._compute_token_bpm(start_time_ms, end_time_ms)
     
     # compute "ROE", "BTR","MTR","TTR","SC","MSF","SF","OCN","EV" on original master
     S = np.abs(librosa.stft(y_token))
@@ -184,9 +203,34 @@ class DSPManager:
     S_harmonic_instrumental = np.abs(librosa.stft(y_instrumental_harmonic[start_sample:end_sample]))
     her = np.mean(librosa.feature.rms(S=S_harmonic_instrumental)) / total_rms_mean
 
-    # TODO compute vocal_confidence, vocal_presence, start_BVR and end_BVR on vocal track
+    # compute VED, vocal_intensity, vocal_confidence and vocal_density on vocal track
+
+    global_token_vocal_features = self._compute_DSP_vocal_features(start_time_ms, end_time_ms)
+
+
+    # we calculate the vocal features at the start and at the end of the token to get an idea of the vocal presence at the boundaries, which is useful to predict vocal clashes when mixing. we use a window of 1 bar (which is 4 beats) but we can experiment with different window sizes.
+
+    # convert the window size from bars to ms 
+    bar_duration_ms = (60000 * 4) / bpm 
+    start_edge_vocal = self._compute_DSP_vocal_features(start_time_ms, start_time_ms + VOCAL_START_END_BAR_WINDOW * bar_duration_ms)
+    end_edge_vocal = self._compute_DSP_vocal_features(end_time_ms - VOCAL_START_END_BAR_WINDOW * bar_duration_ms, end_time_ms)
+
+    edge_keys = (
+      "vocal_energy_dominance",
+      "vocal_intensity",
+      "vocal_confidence",
+      "vocal_density",
+    )
+    start_edge_features = {k: round(float(v), 4) for k, v in zip(edge_keys, start_edge_vocal)}
+    end_edge_features = {k: round(float(v), 4) for k, v in zip(edge_keys, end_edge_vocal)}
+
+    global_token_vocal_features_dict = {k: round(float(v), 4) for k, v in zip(edge_keys, global_token_vocal_features)}
+
+    global_token_vocal_features_dict["start_edge_features"] = start_edge_features
+    global_token_vocal_features_dict["end_edge_features"] =  end_edge_features
 
     return {
+        "BPM": round(float(bpm), 2),
         "ROE": round(float(roe), 4),
         "BTR": round(float(btr), 4),
         "MTR": round(float(mtr), 4),
@@ -196,10 +240,9 @@ class DSPManager:
         "SF": round(float(sf), 4),
         "OCN": int(ocn),
         "EV": round(float(ev), 4),
-        "HER": round(float(her), 4)
+        "HER": round(float(her), 4),
+        "vocal_features": global_token_vocal_features_dict
     }
-  
-
 
   def compute_camelot_key(self, start_time_ms: float, end_time_ms: float) -> str:
     """
@@ -344,11 +387,142 @@ class DSPManager:
 
     return lyrics_data
 
-  def compute_vocal_features(self, start_time_ms, end_time_ms):
-    #TODO this method calculates vocal_confidence, vocal_presence, start_BVR and end_BVR for the interval. 
-    # it does this on the vocal_track of the song  
+  def _compute_DSP_vocal_features(self, start_time_ms, end_time_ms):
+    # this method calculates vocal_energy_dominance, vocal_confidence, vocal_density, start_BVR and end_BVR for the interval. 
+    # it does this on the vocal_track of the song 
 
-    pass
+    y_vocal, y_instrumental = self._get_y_splitted()
+    # 1. Convert milliseconds to array indices
+    start_sample = int(start_time_ms * self.sr / 1000)
+    end_sample = int(end_time_ms * self.sr / 1000)
+    # 2. Slice the vocal and instrumental tracks for this specific token
+    y_token_vocal = y_vocal[start_sample:end_sample]
+    y_token_instrumental = y_instrumental[start_sample:end_sample]
+
+    # vocal_energy_dominance is the average energy of the vocal track compared to the instrumental, it gives an idea of how dominant the vocals are in this token.
+    # NOTE: VED is not normalized, so if two tokens in two different songs have the same VED maybe the songs have different thresholds for vocal presence, so we get a local idea of how much the vocals are dominant. but the same value in two different songs means different things. 
+    # the energy is the RMS of the signal 
+    vocal_energy_dominance = self._rms_ratio(y_token_vocal, y_token_instrumental)
+
+    vocal_density_threshold = self._get_vocal_threshold()
+
+    # vocal intensity is the normalized VED. this makes tokens from different songs comparable. 
+    # it's 0 when VED <= T, 1 when VED = vocal_center and it can be higher than 1 if VED > vocal_center. this allows us to capture the fact that in some tokens the vocals are not only present but also very dominant, which can be useful for the model to learn that these tokens are more "vocal-heavy" than others.
+
+    # we calculate the vocal_center with kmeans
+    _, vocal_center, _ = self._compute_noise_vocal_kmeans()
+    vocal_intensity = (vocal_energy_dominance - vocal_density_threshold) / (vocal_center - vocal_density_threshold)
+
+    # vocal_confidence is a value between 0 and 1 that indicates how much we can be confident that there are vocals in this token. it's calculated with the sigmoid of the vocal_energy_dominance centered around the vocal_density_threshold, so that if the vocal_energy_dominance is equal to the threshold, the vocal_confidence is 0.5, if it's higher than the threshold, the vocal_confidence is closer to 1, and if it's lower than the threshold, the vocal_confidence is closer to 0.
+
+    vocal_confidence_steepness = self._get_vocal_confidence_steepness()
+    vocal_confidence = 1/(1 + np.exp(-vocal_confidence_steepness * (vocal_energy_dominance - vocal_density_threshold)))
+
+    # vocal_density is a percentual value that indicates how much of the token is occupied by vocals.
+    # we split the token in 100ms windows and we check if there are vocals in each window (we calculate VED for each of theese windows), then we divide the number of windows with vocals by the total number of windows to get the vocal presence percentage.
+    windows_VEDs = self._compute_VED_for_windows(y_token_vocal, y_token_instrumental)
+
+    # a window has vocals if its VED > vocal_density_threshold. which is the same as saying that vocal_confidence is higher than 0.5, so it falls on the right side of the sigmoid curve.
+    vocal_density = sum(vc > vocal_density_threshold for vc in windows_VEDs) / len(windows_VEDs)
+
+
+    return vocal_energy_dominance, vocal_intensity, vocal_confidence, vocal_density
+  
+
+  def _get_vocal_threshold(self):
+      """Calculates a dynamic threshold using Bimodal Clustering on the whole track."""
+      # If we've already calculated it, return the cached value
+      if hasattr(self, '_dynamic_vocal_threshold'):
+          return self._dynamic_vocal_threshold
+
+      
+      noise_center, vocal_center, VEDs = self._compute_noise_vocal_kmeans()
+      # The threshold is the valley directly between them
+      # Bias the threshold closer to the noise floor (VOCAL_THRESHOLD_GEOMETRIC_BIAS% mark)
+      # This prevents quiet/filtered vocals from being grouped into the Noise cluster.
+      distance = vocal_center - noise_center
+      calculated_threshold = noise_center + (distance * VOCAL_THRESHOLD_GEOMETRIC_BIAS)
+      
+      # If it's a pure instrumental track, both centers will be tiny. 
+      # We enforce a hard floor of VOCAL_THRESHOLD_FLOOR so it doesn't hallucinate vocals in the noise.
+      self._dynamic_vocal_threshold = max(calculated_threshold, VOCAL_THRESHOLD_FLOOR)
+      self._generate_kmeans_threshold_graph(VEDs, self._dynamic_vocal_threshold)  
+      return self._dynamic_vocal_threshold
+
+  def _compute_noise_vocal_kmeans(self):
+    if hasattr(self, '_noise_vocal_kmeans_cache'):
+      return self._noise_vocal_kmeans_cache
+
+    y_vocal, y_instrumental = self._get_y_splitted()
+    # Calculate VED for the whole song (see the calculation of VED for reference)
+    VEDs = self._compute_VED_for_windows(y_vocal, y_instrumental)
+    
+    # Format the data for scikit-learn
+    from sklearn.cluster import KMeans
+    X = np.array(VEDs).reshape(-1, 1)
+    
+    # find the 2 clusters (Noise vs. Vocals)
+    kmeans = KMeans(n_clusters=2, n_init=10, random_state=42).fit(X)
+    
+    # Get the centers of the two clusters and sort them (low = noise, high = vocals)
+    centers = sorted(kmeans.cluster_centers_.flatten())
+    noise_center = centers[0]
+    vocal_center = centers[1]
+
+    self._noise_vocal_kmeans_cache = (noise_center, vocal_center, VEDs)
+    return self._noise_vocal_kmeans_cache
+  
+  def _get_vocal_confidence_steepness(self, eps = 1e-6):
+     if hasattr(self, '_vocal_confidence_steepness_cache'):
+       return self._vocal_confidence_steepness_cache
+
+     noise_center, vocal_center, _ = self._compute_noise_vocal_kmeans()
+     threshold = self._get_vocal_threshold()
+     delta = vocal_center - threshold
+     # sigmoid is 0.99 when x = vocal_center  
+     self._vocal_confidence_steepness_cache = np.log(99) / max(delta,eps)  # small epsilon to avoid division by zero
+     return self._vocal_confidence_steepness_cache
+     
+  
+  def _generate_kmeans_threshold_graph(self, window_veds, threshold):
+    """Visualizes the bimodal distribution of vocal energy dominance scores."""
+    from matplotlib import pyplot as plt
+    plt.figure(figsize=(10, 6))
+    
+    # FIXED: Labels updated to reflect Frame-level Vocal Energy Dominance instead of Token Confidence
+    plt.hist(window_veds, bins=30, alpha=0.6, color='steelblue', edgecolor='white', label='Frame Dominance Distribution')
+    
+    # Plot the calculated threshold line
+    plt.axvline(x=threshold, color='red', linestyle='--', linewidth=2.5, label=f'K-Means Threshold ({threshold:.3f})')
+    
+    plt.title("Vocal Energy Dominance Distribution")
+    plt.xlabel("Vocal Energy Dominance Ratio (VED)")
+    plt.ylabel("Number of Frames (100ms)")
+    plt.legend()
+    output_dir = DATA_DIR / "json_db" / self.track_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "vocal_threshold_distribution.png"
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+  def _rms_ratio(self, y_num, y_den, eps=1e-6):
+    num = librosa.feature.rms(y=y_num).mean()
+    den = librosa.feature.rms(y=y_den).mean()
+    return num / (num + den + eps)
+  
+  
+  def _compute_VED_for_windows(self, y_vocal, y_instrumental):
+    frame_size = int(VOCAL_WINDOW_DURATION_SEC * self.sr)
+    vocal_windows = librosa.util.frame(y_vocal, frame_length=frame_size, hop_length=frame_size).T
+    instrumental_windows = librosa.util.frame(y_instrumental, frame_length=frame_size, hop_length=frame_size).T
+    return [self._rms_ratio(vw, iw) for vw, iw in zip(vocal_windows, instrumental_windows)]
+  
+  def _generate_vocal_density_graph(self, windows_vocal_confidences, threshold):
+    """Visualizes the vocal density across the token's windows."""
+    from matplotlib import pyplot as plt
+    #TODO 
+    pass 
+
 if __name__ == "__main__":
     print("started beatnet wrapper test")
     # resolve path 
