@@ -300,6 +300,20 @@ class Track:
     
     return token_lyrics
 
+  def generate_token_audio(self, token_index):
+    if token_index < 0 or token_index >= len(self.tokens):
+        raise ValueError("Invalid token index")
+
+    token = self.tokens[token_index]
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    track_folder = Path(self.name).stem
+    tokens_dir = repo_root / "data" / "raw_audio" / track_folder / "tokens"
+    tokens_dir.mkdir(parents=True, exist_ok=True)
+
+    output_path = tokens_dir / f"{token_index}.wav"
+    self.dsp_manager.generate_audio_slice(token.start_time_ms, token.end_time_ms, str(output_path))
+    return str(output_path)
+
   def json(self):
     return {
       "path": self.path,
@@ -369,3 +383,8 @@ if __name__ == "__main__":
   with open(LLM_json_path, "w") as f:
       json.dump(track.LLM_representation(), f, indent=4)
   print(f"LLM representation JSON saved to {LLM_json_path}")
+
+  print("\n\n\n\n############ TOKEN AUDIO SLICE TEST ##############")
+  for token in track.tokens:
+      token_audio_path = track.generate_token_audio(token.index)
+      print(f"Generated audio slice for token {token.index} at {token_audio_path}")

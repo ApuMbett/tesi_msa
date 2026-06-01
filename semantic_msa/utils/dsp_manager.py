@@ -523,6 +523,15 @@ class DSPManager:
     #TODO 
     pass 
 
+  def generate_audio_slice(self, start_time_ms, end_time_ms, output_path):
+    # this method generates an audio slice of the original track between start_time and end_time
+    import soundfile as sf
+    start_sample = int(start_time_ms * self.sr / 1000)
+    end_sample = int(end_time_ms * self.sr / 1000)
+    y_slice = self.y[start_sample:end_sample]
+    sf.write(output_path, y_slice, self.sr)
+
+
 if __name__ == "__main__":
     print("started beatnet wrapper test")
     # resolve path 
