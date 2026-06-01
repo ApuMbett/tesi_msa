@@ -1,6 +1,7 @@
 from BeatNet.BeatNet import BeatNet
 import numpy as np
 from collections import Counter
+from functools import cached_property
 import librosa
 import os
 import subprocess
@@ -20,7 +21,7 @@ VOCAL_THRESHOLD_FLOOR = 0.10 #  # If it's a pure instrumental track, both center
 VOCAL_THRESHOLD_GEOMETRIC_BIAS = 0.25  # Bias the K-Means threshold towards the noise floor by this percentage, so between the noise floor centroid (if bias = 0.0) and the vocal dominance centroid (if bias = 1.0).
 
 VOCAL_CONFIDENCE_STEEPNESS = 20
-# This controls how sharply the vocal_confidence transitions from 0 to 1 around the vocal_density_threshold. A higher value means a more binary classification (closer to a step function), while a lower value creates a softer transition. from psychoacoustics categorical perception of vocal presence studies we know that a good value is between 20 and 30. This is used if we want a fixed steepness, in this code we calculate it dynamically in _get_vocal_confidence_steepness() 
+# This controls how sharply the vocal_confidence transitions from 0 to 1 around the vocal_density_threshold. A higher value means a more binary classification (closer to a step function), while a lower value creates a softer transition. from psychoacoustics categorical perception of vocal presence studies we know that a good value is between 20 and 30. This is used if we want a fixed steepness, in this code we calculate it dynamically in vocal_confidence_steepness.
 
 VOCAL_WINDOW_DURATION_SEC = 0.1  
 # WHY: 100ms is good for human speech. 
@@ -153,7 +154,7 @@ class DSPManager:
     end_sample = int(end_time_ms * self.sr / 1000)
     
     # 2. get the splitted vocal and instrumental tracks.
-    y_vocal, y_instrumental = self._get_y_splitted()
+    y_vocal, y_instrumental = self.y_split
     # 3. Slice the audio array for this specific token
     y_token = self.y[start_sample:end_sample]
     y_token_vocal = y_vocal[start_sample:end_sample]
@@ -199,7 +200,7 @@ class DSPManager:
     ev = np.var(rms_env)
     
     # Compute HER on instrumental track
-    y_instrumental_harmonic, _ = self._get_instrumental_hpss()
+    y_instrumental_harmonic, _ = self.instrumental_hpss
     S_harmonic_instrumental = np.abs(librosa.stft(y_instrumental_harmonic[start_sample:end_sample]))
     her = np.mean(librosa.feature.rms(S=S_harmonic_instrumental)) / total_rms_mean
 
@@ -255,7 +256,7 @@ class DSPManager:
     
     # 2. Extract the Chromagram (Pitch Class Profile)
     # y_harmonic isolates the tonal elements from the percussive transients
-    y_harmonic, _ = self._get_instrumental_hpss()
+    y_harmonic, _ = self.instrumental_hpss
     y_harmonic = y_harmonic[start_sample:end_sample]
     if len(y_harmonic) == 0:
         return "Unknown"
@@ -314,35 +315,32 @@ class DSPManager:
     # 5. Translate the standard key to Camelot
     return camelot_map.get(best_key, "Unknown")
   
-  def _get_instrumental_hpss(self):
+  @cached_property
+  def instrumental_hpss(self):
     """
     Lazy evaluation for HPSS on the Instrumental track ONLY.
     Calculates the entire track once and caches it.
     """
-    if not hasattr(self, '_y_inst_harmonic') or self._y_inst_harmonic is None:
-        # 1. Make sure we have the stems loaded
-        _, y_inst = self._get_y_splitted()
-        
-        # 2. Run the heavy math on the full instrumental track
-        self._y_inst_harmonic, self._y_inst_percussive = librosa.effects.hpss(y_inst)
-        
-    return self._y_inst_harmonic, self._y_inst_percussive
-
-  def _get_y_splitted(self):
-    # lazy evaluation for the splitted vocal and instrumental tracks, since we need them in multiple places and we don't want to run demucs multiple times. 
-    if hasattr(self, '_y_vocal') and self._y_vocal is not None:
-      return self._y_vocal, self._y_instrumental
+    # 1. Make sure we have the stems loaded
+    _, y_inst = self.y_split
     
+    # 2. Run the heavy math on the full instrumental track
+    y_inst_harmonic, y_inst_percussive = librosa.effects.hpss(y_inst)
+    
+    return y_inst_harmonic, y_inst_percussive
+
+  @cached_property
+  def y_split(self):
+    # lazy evaluation for the splitted vocal and instrumental tracks, since we need them in multiple places and we don't want to run demucs multiple times.
     if not self.has_splitted_tracks():
       self.split_song_tracks()
 
     vocal_path = AUDIO_DIR / "htdemucs" / self.track_name / "vocals.wav"
     instrumental_path = AUDIO_DIR / "htdemucs" / self.track_name / "no_vocals.wav"
-    self._y_vocal, _ = librosa.load(vocal_path, sr=self.sr)
-    self._y_instrumental, _ = librosa.load(instrumental_path, sr=self.sr)
+    y_vocal, _ = librosa.load(vocal_path, sr=self.sr)
+    y_instrumental, _ = librosa.load(instrumental_path, sr=self.sr)
     
-    # 4. Return the cached arrays
-    return self._y_vocal, self._y_instrumental
+    return y_vocal, y_instrumental
 
 
   def split_song_tracks(self):
@@ -391,7 +389,7 @@ class DSPManager:
     # this method calculates vocal_energy_dominance, vocal_confidence, vocal_density, start_BVR and end_BVR for the interval. 
     # it does this on the vocal_track of the song 
 
-    y_vocal, y_instrumental = self._get_y_splitted()
+    y_vocal, y_instrumental = self.y_split
     # 1. Convert milliseconds to array indices
     start_sample = int(start_time_ms * self.sr / 1000)
     end_sample = int(end_time_ms * self.sr / 1000)
@@ -404,18 +402,18 @@ class DSPManager:
     # the energy is the RMS of the signal 
     vocal_energy_dominance = self._rms_ratio(y_token_vocal, y_token_instrumental)
 
-    vocal_density_threshold = self._get_vocal_threshold()
+    vocal_density_threshold = self.vocal_threshold
 
     # vocal intensity is the normalized VED. this makes tokens from different songs comparable. 
     # it's 0 when VED <= T, 1 when VED = vocal_center and it can be higher than 1 if VED > vocal_center. this allows us to capture the fact that in some tokens the vocals are not only present but also very dominant, which can be useful for the model to learn that these tokens are more "vocal-heavy" than others.
 
     # we calculate the vocal_center with kmeans
-    _, vocal_center, _ = self._compute_noise_vocal_kmeans()
+    _, vocal_center, _ = self.noise_vocal_kmeans
     vocal_intensity = (vocal_energy_dominance - vocal_density_threshold) / (vocal_center - vocal_density_threshold)
 
     # vocal_confidence is a value between 0 and 1 that indicates how much we can be confident that there are vocals in this token. it's calculated with the sigmoid of the vocal_energy_dominance centered around the vocal_density_threshold, so that if the vocal_energy_dominance is equal to the threshold, the vocal_confidence is 0.5, if it's higher than the threshold, the vocal_confidence is closer to 1, and if it's lower than the threshold, the vocal_confidence is closer to 0.
 
-    vocal_confidence_steepness = self._get_vocal_confidence_steepness()
+    vocal_confidence_steepness = self.vocal_confidence_steepness
     vocal_confidence = 1/(1 + np.exp(-vocal_confidence_steepness * (vocal_energy_dominance - vocal_density_threshold)))
 
     # vocal_density is a percentual value that indicates how much of the token is occupied by vocals.
@@ -429,31 +427,25 @@ class DSPManager:
     return vocal_energy_dominance, vocal_intensity, vocal_confidence, vocal_density
   
 
-  def _get_vocal_threshold(self):
+  @cached_property
+  def vocal_threshold(self):
       """Calculates a dynamic threshold using Bimodal Clustering on the whole track."""
-      # If we've already calculated it, return the cached value
-      if hasattr(self, '_dynamic_vocal_threshold'):
-          return self._dynamic_vocal_threshold
-
-      
-      noise_center, vocal_center, VEDs = self._compute_noise_vocal_kmeans()
+      noise_center, vocal_center, VEDs = self.noise_vocal_kmeans
       # The threshold is the valley directly between them
       # Bias the threshold closer to the noise floor (VOCAL_THRESHOLD_GEOMETRIC_BIAS% mark)
       # This prevents quiet/filtered vocals from being grouped into the Noise cluster.
       distance = vocal_center - noise_center
       calculated_threshold = noise_center + (distance * VOCAL_THRESHOLD_GEOMETRIC_BIAS)
       
-      # If it's a pure instrumental track, both centers will be tiny. 
+      # If it's a pure instrumental track, both centers will be tiny.
       # We enforce a hard floor of VOCAL_THRESHOLD_FLOOR so it doesn't hallucinate vocals in the noise.
-      self._dynamic_vocal_threshold = max(calculated_threshold, VOCAL_THRESHOLD_FLOOR)
-      self._generate_kmeans_threshold_graph(VEDs, self._dynamic_vocal_threshold)  
-      return self._dynamic_vocal_threshold
+      dynamic_vocal_threshold = max(calculated_threshold, VOCAL_THRESHOLD_FLOOR)
+      self._generate_kmeans_threshold_graph(VEDs, dynamic_vocal_threshold)
+      return dynamic_vocal_threshold
 
-  def _compute_noise_vocal_kmeans(self):
-    if hasattr(self, '_noise_vocal_kmeans_cache'):
-      return self._noise_vocal_kmeans_cache
-
-    y_vocal, y_instrumental = self._get_y_splitted()
+  @cached_property
+  def noise_vocal_kmeans(self):
+    y_vocal, y_instrumental = self.y_split
     # Calculate VED for the whole song (see the calculation of VED for reference)
     VEDs = self._compute_VED_for_windows(y_vocal, y_instrumental)
     
@@ -469,19 +461,16 @@ class DSPManager:
     noise_center = centers[0]
     vocal_center = centers[1]
 
-    self._noise_vocal_kmeans_cache = (noise_center, vocal_center, VEDs)
-    return self._noise_vocal_kmeans_cache
-  
-  def _get_vocal_confidence_steepness(self, eps = 1e-6):
-     if hasattr(self, '_vocal_confidence_steepness_cache'):
-       return self._vocal_confidence_steepness_cache
+    return noise_center, vocal_center, VEDs
 
-     noise_center, vocal_center, _ = self._compute_noise_vocal_kmeans()
-     threshold = self._get_vocal_threshold()
-     delta = vocal_center - threshold
-     # sigmoid is 0.99 when x = vocal_center  
-     self._vocal_confidence_steepness_cache = np.log(99) / max(delta,eps)  # small epsilon to avoid division by zero
-     return self._vocal_confidence_steepness_cache
+  @cached_property
+  def vocal_confidence_steepness(self):
+    eps = 1e-6
+    noise_center, vocal_center, _ = self.noise_vocal_kmeans
+    threshold = self.vocal_threshold
+    delta = vocal_center - threshold
+    # sigmoid is 0.99 when x = vocal_center
+    return np.log(99) / max(delta, eps)  # small epsilon to avoid division by zero
      
   
   def _generate_kmeans_threshold_graph(self, window_veds, threshold):

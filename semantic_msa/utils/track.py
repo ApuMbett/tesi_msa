@@ -125,8 +125,8 @@ class Track:
 
     self.lyrics = self.dsp_manager.get_lyrics()
     
-    self.vocal_density_threshold = self.dsp_manager._get_vocal_threshold()
-    self.vocal_confidence_steepness = self.dsp_manager._get_vocal_confidence_steepness()
+    self.vocal_density_threshold = self.dsp_manager.vocal_threshold
+    self.vocal_confidence_steepness = self.dsp_manager.vocal_confidence_steepness
     self.tokens = self._build_token_map()
 
     self.key = self.dsp_manager.compute_camelot_key(0, self.duration_ms)
@@ -311,6 +311,8 @@ class Track:
     
     return token_lyrics
 
+
+  ##### SERIALIZATION AND LLM REPRESENTATION METHODS #####
   def generate_token_audio(self, token_index):
     if token_index < 0 or token_index >= len(self.tokens):
         raise ValueError("Invalid token index")
@@ -407,7 +409,7 @@ class Track:
         "bpm": self.bpm,
         "tokens": [token.LLM_representation() for token in self.tokens]
      }
-    
+  
 
     
 
