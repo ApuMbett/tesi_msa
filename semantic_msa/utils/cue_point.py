@@ -18,6 +18,13 @@ class RawCuePoint:
           "time_ms": self.time,
           "confidence_score": self.score,
         }
+    # TODO refactor classes as dataclasses
+    @classmethod
+    def from_dict(cls, data: dict):
+        """
+        Deserializes a RawCuePoint from a dictionary, allowing for easy reconstruction from JSON data.
+        """
+        return cls(time_ms=data.get("time_ms", 0), score=data.get("confidence_score", 0.0))
 
 STRUCTURAL_PENALTY_WEIGHT = 0.5 
 PSYCHOACUSTIC_THRESHOLD_MS = 50 # This threshold is based on psychoacoustic research on temporal perception in music. [TODO - find source for this threshold]
@@ -138,6 +145,43 @@ class SnappedCuePoint:
           "quantization_error_ratio": self.quantization_error_ratio,
           "adjusted_confidence_score": self.score,
         }
+    
+    # TODO refactor classes as dataclasses
+    # @classmethod
+    # def from_dict(cls, data: dict):
+    #     """
+    #     Deserializes a SnappedCuePoint from a dictionary, allowing for easy reconstruction from JSON data.
+    #     """
+    #     raw_data = data.get("raw_cue_point", {})
+    #     raw_cue_point = RawCuePoint.from_dict(raw_data)
+
+    #     snapped_cue = cls(raw_cue_point, beat_grid=None)  # beat_grid is not needed for deserialization as we already have the snapped time and error
+    #     snapped_cue.time = data.get("snapped_time_ms", 0)
+    #     snapped_cue.error = data.get("displacement_error_ms", 0)
+    #     snapped_cue.quantization_error_ratio = data.get("quantization_error_ratio", 1.0)
+    #     snapped_cue.score = data.get("adjusted_confidence_score", 0.0)
+
+    #     return snapped_cue
+
+    @classmethod
+    def load_from_cache(cls, data: dict):
+        """
+        Quick and dirty cache loader. This bypasses __init__ to avoid running
+        the snapping pipeline during deserialization.
+        """
+        raw_data = data.get("raw_cue_point", {})
+        raw_cue_point = RawCuePoint.from_dict(raw_data)
+
+        snapped_cue = cls.__new__(cls)
+        snapped_cue.raw = raw_cue_point
+        snapped_cue.structural_penalty_weight = data.get("structural_penalty_weight")
+        snapped_cue.downbeat_offset_to_skip = data.get("downbeat_offset_to_skip", 0)
+        snapped_cue.time = data.get("snapped_time_ms", 0)
+        snapped_cue.error = data.get("displacement_error_ms", 0)
+        snapped_cue.quantization_error_ratio = data.get("quantization_error_ratio", 1.0)
+        snapped_cue.score = data.get("adjusted_confidence_score", 0.0)
+
+        return snapped_cue
 
 
 

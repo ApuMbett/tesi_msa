@@ -22,11 +22,9 @@ class Token:
     self.dsp_features = dsp_features # TODO this will hold the dsp features for the token, such as bpm, key, energy, etc. we can compute these later using the beatnet wrapper and other tools. it's not important for now
     self.lyrics = lyrics
 
-  
   def get_audio_segment(self):
     # TODO this will return the audio segment corresponding to the token, pydub to do this. it's not important for now
     pass
-  
 
   # TODO
   def _get_DSP_features_LLM_representation(self):
@@ -79,7 +77,19 @@ class Token:
       "dsp_features": self.dsp_features,
       "lyrics": self.lyrics
     }
-  
+  # TODO refactor classes as dataclasses
+  @classmethod
+  def from_dict(cls, data):
+    return cls(
+        index=data["index"],
+        start_time_ms=data["start_time_ms"],
+        end_time_ms=data["end_time_ms"],
+        is_mixable=data["is_mixable"],
+        dsp_features=data.get("dsp_features", {}),
+        lyrics=data.get("lyrics", None),
+        start_cue=RawCuePoint.from_dict(data["start_cue"]) if data.get("start_cue") else None,
+        end_cue=RawCuePoint.from_dict(data["end_cue"]) if data.get("end_cue") else None
+    )
   def LLM_representation(self):
     return {
       "index": self.index,
@@ -92,6 +102,7 @@ class Token:
       "dsp_features": self.dsp_features,
       "lyrics": self._get_lyrics_LLM_representation() if self.lyrics else None
     }
+
 class Track:
   def __init__(self, path, name, author, beats_per_token = 16, structural_penalty_weight = 0.5):
     self.path = path
@@ -328,7 +339,65 @@ class Track:
       "snapped_cues": [cue.json() for cue in self.snapped_cues],
       "tokens": [token.json() for token in self.tokens]
     }
-  
+  # TODO refactor classes as dataclasses
+  # @classmethod
+  # def from_dict(cls, data):
+  #   track = cls(
+  #       path=data["path"],
+  #       name=data["name"],
+  #       author=data["author"],
+  #       beats_per_token=16,  # You can adjust this if needed
+  #       structural_penalty_weight=0.5  # You can adjust this if needed
+  #   )
+  #   track.key = data.get("key", "Unknown Key")
+  #   track.duration_ms = data.get("duration_ms", 0)
+  #   track.best_beat_phase_offset = data.get("best_beat_phase_offset", None)
+  #   track.mean_cue_score = data.get("mean_cue_score", None)
+  #   track.global_vocal_features = data.get("vocal_features", {})
+  #   track.token_boundaries = data.get("token_boundaries", [])
+  #   track.snapped_cues = [SnappedCuePoint.from_dict(cue) for cue in data.get("snapped_cues", [])]
+  #   track.tokens = [Token.from_dict(token) for token in data.get("tokens", [])]
+    
+  #   return track
+
+  # TODO quick and dirty method, i will have to refactor this later by splitting the constructors and the pipeline execution. this is just to have something working for the prototype
+  @classmethod
+  def load_from_cache(cls, json_path: str):
+    """
+    Alternative Constructor: Instantiates the Track directly from full.json
+    by bypassing the heavy __init__ pipeline loop using __new__, while
+    preserving the exact instance attribute schema layout recursively.
+    """
+    # 1. Allocate space for a clean Track instance shell without running __init__
+    obj = cls.__new__(cls)
+    
+    # 2. Parse the cache file into a plain dict
+    with open(json_path, "r", encoding="utf-8") as f:
+      cached_tree = json.load(f)
+    
+    # 3. Re-assign the properties straight to the object to preserve interface symmetry
+    obj.path = cached_tree.get("path")
+    obj.name = cached_tree.get("name")
+    obj.author = cached_tree.get("author")
+    obj.key = cached_tree.get("key")
+    obj.duration_ms = cached_tree.get("duration_ms")
+    obj.best_beat_phase_offset = cached_tree.get("best_beat_phase_offset")
+    obj.mean_cue_score = cached_tree.get("mean_cue_score")
+    obj.token_boundaries = cached_tree.get("token_boundaries", [])
+    obj.snapped_cues = [
+      SnappedCuePoint.load_from_cache(cue) for cue in cached_tree.get("snapped_cues", [])
+    ]
+    obj.tokens = [Token.from_dict(token) for token in cached_tree.get("tokens", [])]
+    
+    # Safely bind remaining pipeline settings or variables
+    vocal_features = cached_tree.get("vocal_features", {})
+    obj.vocal_density_threshold = vocal_features.get("vocal_density_threshold")
+    obj.vocal_confidence_steepness = vocal_features.get("vocal_confidence_steepness")
+    obj.global_vocal_features = vocal_features
+    obj.bpm = cached_tree.get("bpm")
+    
+    # 4. Return the fully hydrated instance object shell
+    return obj
   def LLM_representation(self):
      return{
         "name": self.name,
