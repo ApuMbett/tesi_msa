@@ -99,9 +99,53 @@ class Token:
       "start_cue": self.start_cue.json() if self.start_cue else None,
       "end_cue": self.end_cue.json() if self.end_cue else None,
       "caption": self.caption,
-      "dsp_features": self.dsp_features,
+      "dsp_features": self._get_dsp_features_LLM_representation(),
       "lyrics": self._get_lyrics_LLM_representation() if self.lyrics else None
     }
+  
+  def _get_dsp_features_LLM_representation(self):
+    # deep copy to avoid mutating the original features
+    dsp_features = self.dsp_features.copy()
+
+    # Round top-level numeric features for readability.
+    for key, value in dsp_features.items():
+      if isinstance(value, float):
+        dsp_features[key] = round(value, 2)
+
+    def _vocal_features_LLM_representation(features: dict) -> dict:
+      representation = features.copy()
+
+      # Drop VED because it's not normalized and not very interpretable.
+      representation.pop("vocal_energy_dominance", None)
+
+      rename_map = {
+        "vocal_intensity": "intensity",
+        "vocal_confidence": "confidence",
+        "vocal_density": "density",
+      }
+      for old_name, new_name in rename_map.items():
+        if old_name in representation:
+          representation[new_name] = representation.pop(old_name)
+
+      for vocal_key in ["intensity", "confidence", "density"]:
+        if isinstance(representation.get(vocal_key), float):
+          representation[vocal_key] = round(representation[vocal_key], 2)
+
+      return representation
+
+    vocal_features = dsp_features.get("vocal_features")
+    if isinstance(vocal_features, dict):
+      vocal_features = vocal_features.copy()
+      vocal_features["start_edge"] = _vocal_features_LLM_representation(
+        vocal_features.pop("start_edge_features", {})
+      )
+      vocal_features["end_edge"] = _vocal_features_LLM_representation(
+        vocal_features.pop("end_edge_features", {})
+      )
+      vocal_features = _vocal_features_LLM_representation(vocal_features)
+      dsp_features["vocal_features"] = vocal_features
+
+    return dsp_features
 
 class Track:
   def __init__(self, path, name, author, beats_per_token = 16, structural_penalty_weight = 0.5):
@@ -334,9 +378,11 @@ class Track:
       "author": self.author,
       "key": self.key,
       "duration_ms": self.duration_ms,
+      "token_size_beats": self.dsp_manager.beats_per_token,
       "best_beat_phase_offset": self.best_beat_phase_offset,
       "mean_cue_score": self.mean_cue_score,
       "vocal_features": self.global_vocal_features,
+      "lyrics_profile": self.LLM_lyrics_profile,
       "token_boundaries": self.token_boundaries,
       "snapped_cues": [cue.json() for cue in self.snapped_cues],
       "tokens": [token.json() for token in self.tokens]
@@ -405,11 +451,57 @@ class Track:
         "name": self.name,
         "author": self.author,
         "duration_ms": self.duration_ms,
+        "token_size_beats": 16, # TODO change into "self.dsp_manager.beats_per_token", now it's not possible because of the quick and dirty load_from_cache method, refactor this later by splitting the constructors and the pipeline execution. this is just to have something working for the prototype
+        # TODO global dsp features.
         "key": self.key,
         "bpm": self.bpm,
         "tokens": [token.LLM_representation() for token in self.tokens]
      }
   
+  @property
+  def LLM_lyrics_profile(self) -> dict:
+    """
+    Computes global lyric tracking metrics and synthesizes a trust score
+    by inspecting confidence boundaries across all text tokens.
+    """
+    min_scores = []
+    median_scores = []
+    
+    # Safely iterate through our tokens array (handles both objects and namespaces)
+    tokens = self.tokens
+    for token in tokens:
+      tokens = self.tokens
+      full_text = ""
+      for token in tokens:
+        if token.lyrics != []:
+          for word in token.lyrics["words"]:
+            full_text += word["word"] + " "
+
+          min_scores.append(token.lyrics["min_score"])
+          median_scores.append(token.lyrics["median_score"])  
+
+    # Compute global averages to determine our reliability threshold
+    avg_min = sum(min_scores) / len(min_scores)
+    avg_med = sum(median_scores) / len(median_scores)
+
+    # Apply your system constants to establish the trust classification
+    if avg_med >= HIGH_MEDIAN_SCORE and avg_min >= HIGH_MIN_SCORE:
+        reliability_tag = "HIGH"
+    elif avg_med < LOW_MEDIAN_SCORE or avg_min < LOW_MIN_SCORE:
+        reliability_tag = "LOW (Hallucination Risk)"
+    else:
+        reliability_tag = "MEDIUM"
+
+    return {
+      "text": full_text,
+      "reliability": reliability_tag,
+      "metrics": {
+        "avg_median": round(avg_med, 2),
+        "avg_min": round(avg_min, 2)
+      }
+    }
+    
+
 
     
 
