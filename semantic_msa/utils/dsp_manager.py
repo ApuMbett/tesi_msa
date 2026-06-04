@@ -145,10 +145,10 @@ class DSPManager:
       
       return round(bpm, 1) # Rounds to a clean decimal like 128.0
 
-  # TODO: compute vocal_confidence, vocal_density, start_BVR and end_BVR on vocal track
+
 
   def compute_low_level_dsp_features(self, start_time_ms, end_time_ms):
-    # TODO this is temporary but i just need it to see if it works, i will investigate later for better features for our purposes 
+
     # 1. Convert milliseconds to array indices
     start_sample = int(start_time_ms * self.sr / 1000)
     end_sample = int(end_time_ms * self.sr / 1000)
