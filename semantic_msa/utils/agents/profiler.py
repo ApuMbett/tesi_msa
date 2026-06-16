@@ -16,10 +16,104 @@ if utils_dir not in sys.path:
 
 from track import Track
 
+#### RESPONSE DTOs ####
+from dataclasses import dataclass, field
+from typing import Optional
+import json
 
+
+@dataclass
+class MacroProfile:
+    inferred_genres: list[str]
+    energy_tier: str
+    rationale: str
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "MacroProfile":
+        return cls(
+            inferred_genres=data["inferred_genres"],
+            energy_tier=data["energy_tier"],
+            rationale=data["rationale"],
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "inferred_genres": self.inferred_genres,
+            "energy_tier": self.energy_tier,
+            "rationale": self.rationale,
+        }
+
+
+@dataclass
+class VocalProfile:
+    presence_level: str
+    lyrics_validity: str
+    rationale: str
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "VocalProfile":
+        return cls(
+            presence_level=data["presence_level"],
+            lyrics_validity=data["lyrics_validity"],
+            rationale=data["rationale"],
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "presence_level": self.presence_level,
+            "lyrics_validity": self.lyrics_validity,
+            "rationale": self.rationale,
+        }
+
+
+@dataclass
+class DynamicTrajectory:
+    energy_flow: str
+    rationale: str
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "DynamicTrajectory":
+        return cls(
+            energy_flow=data["energy_flow"],
+            rationale=data["rationale"],
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "energy_flow": self.energy_flow,
+            "rationale": self.rationale,
+        }
+
+
+@dataclass
+class ProfilerResponseDTO:
+    macro_profile: MacroProfile
+    vocal_profile: VocalProfile
+    dynamic_trajectory: DynamicTrajectory
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ProfilerResponseDTO":
+        return cls(
+            macro_profile=MacroProfile.from_dict(data["macro_profile"]),
+            vocal_profile=VocalProfile.from_dict(data["vocal_profile"]),
+            dynamic_trajectory=DynamicTrajectory.from_dict(data["dynamic_trajectory"]),
+        )
+
+    @classmethod
+    def from_json(cls, json_str: str) -> "ProfilerResponseDTO":
+        return cls.from_dict(json.loads(json_str))
+
+    def to_dict(self) -> dict:
+        return {
+            "macro_profile": self.macro_profile.to_dict(),
+            "vocal_profile": self.vocal_profile.to_dict(),
+            "dynamic_trajectory": self.dynamic_trajectory.to_dict(),
+        }
+
+    def to_json(self, indent: Optional[int] = 2) -> str:
+        return json.dumps(self.to_dict(), indent=indent)
 
 logger = logging.getLogger("MSAPipeline.Profiler")
-
 class ProfilerTokenDTO:
     def __init__(self, token: Dict[str, Any]):
         
@@ -204,9 +298,12 @@ class Profiler(Agent):
             "duration": formatted_duration,
             "default_token_beats": metadata.get("token_size_beats", 16), 
             "key": metadata.get("key"),
-            "global_metrics": compute_global_metrics(LLM_track_metadata.get("tokens", [])),
+            "global_metrics": compute_global_metrics(LLM_track_metadata.get("tokens", [])), 
             "tokens": metadata.get("tokens", [])
         }    
+
+        # TODO add global vocal features.
+        # TODO edit the prompt to support global features "Use the global_vocal_intensity and global_vocal_density to determine the overall presence_level, but rely on the individual token math to map where those vocals physically start and stop in the dynamic_trajectory."
         return json.dumps(ordered_metadata, ensure_ascii=True)
 
 def resolve_path(track_name: str) -> str:
@@ -229,13 +326,17 @@ def get_wizard_of_oz(track_name: str) -> str:
 
     return profiler.get_system_prompt() + "\n\n" + user_message
 
+
+def batch_oz(track_names: list[str]):
+    for track_name in track_names:
+        output_text = get_wizard_of_oz(track_name)
+        output_dir = Path(__file__).resolve().parent / Path(track_name).stem
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / "oz.md"
+        output_path.write_text(output_text, encoding="utf-8")
+
 if __name__ == "__main__":
-    track_name = "intheend"
-    output_text = get_wizard_of_oz(track_name)
-    output_dir = Path(__file__).resolve().parent / Path(track_name).stem
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / "oz.md"
-    output_path.write_text(output_text, encoding="utf-8")
+    batch_oz(["intheend", "levels","satisfaction","shotmedown","vielleicht"])
 
 
     # track_path = resolve_path(track_name)
