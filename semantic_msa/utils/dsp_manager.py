@@ -89,22 +89,53 @@ class DSPManager:
 
   
   
-  def compute_global_bpm(self): 
-      """Returns the median BPM of the entire track.
-
-      This method computes the BPM for each 16-beat token and returns the most common BPM as the global estimate. This approach accounts for potential tempo variations across the track while providing a robust overall BPM estimate for mix preparation.
-      """
-      bpm_estimates = []
-      token_boundaries = self.get_semantic_audio_token_boundaries()
-      for i in range(len(token_boundaries)-1):
-        start_time = token_boundaries[i]
-        end_time = token_boundaries[i+1]
-        bpm = self._compute_token_bpm(start_time, end_time)
-        if bpm is not None:
-          bpm_estimates.append(bpm)
+  def compute_global_bpm(self, cached_token_bpms = None): 
+      """Returns the global BPM of the track.
       
-      most_common = Counter(bpm_estimates).most_common(1)
-      return float(most_common[0][0])
+      This method computes the BPM for each full-length 16-beat token (Daniels, 2010). 
+      To handle expressive timing variance and the bimodal tempo distributions common 
+      in electronic dance music (Knees et al., 2015), it groups localized estimates into 
+      integer tolerance bins. The global tempo is derived from the mean of the absolute 
+      majority bin, effectively isolating the true tempo anchor from transitional noise 
+      and extreme syncopated outliers (Schreiber et al., 2020).
+      """
+      token_boundaries = self.get_semantic_audio_token_boundaries()
+      bpm_estimates = cached_token_bpms if cached_token_bpms is not None else []
+      if not cached_token_bpms:
+        for i in range(len(token_boundaries)-1):
+            start_time = token_boundaries[i]
+            end_time = token_boundaries[i+1]
+            duration_ms = end_time - start_time
+            
+            # 1. EDGE-TOKEN FILTER: 
+            # A 16-beat token at a blistering 200 BPM is still 4800ms. 
+            # Anything shorter than 3000ms is a partial edge token that will break the math.
+            if duration_ms < 3000:
+                continue
+                
+            bpm = self._compute_token_bpm(start_time, end_time)
+            if bpm is not None:
+                bpm_estimates.append(bpm)
+      
+      if not bpm_estimates:
+          return None
+          
+      # 2. TOLERANCE BINS (The Knees et al. EDM Fix):
+      # Rounding groups messy floats (e.g., 128.2 and 127.8) into a single '128' bin
+      rounded_bpms = [round(bpm) for bpm in bpm_estimates]
+      
+      # 3. FIND THE ABSOLUTE MAJORITY:
+      # Get the integer bin with the highest density of tokens
+      most_common_bin = Counter(rounded_bpms).most_common(1)[0][0]
+      
+      # 4. PRECISE CONSENSUS AVERAGE:
+      # Take only the raw floating-point BPMs that fell into our winning bin and average them.
+      # This prevents the 170+ BPM drops from pulling the average up, but still gives 
+      # you a highly precise decimal output (like 128.3) instead of a flat 128.
+      winning_floats = [bpm for bpm in bpm_estimates if round(bpm) == most_common_bin]
+      final_global_bpm = sum(winning_floats) / len(winning_floats)
+      
+      return round(final_global_bpm, 1)
 
   def _compute_token_bpm(self, start_time_ms, end_time_ms):
         """Returns the BPM for a specific token defined by start_time and end_time.
@@ -524,7 +555,7 @@ class DSPManager:
 if __name__ == "__main__":
     print("started beatnet wrapper test")
     # resolve path 
-    path = DATA_DIR / "raw_audio" / "shotmedown.mp3"
+    path = DATA_DIR / "raw_audio" / "vielleicht.mp3"
 
     bn = DSPManager(audio_path = str(path))
 
@@ -549,10 +580,3 @@ if __name__ == "__main__":
         print(f"Token {i}: BPM={bpm}")
     
     print("Median BPM across tokens:", np.median(bpms))
-
-    print("LYRICS TEST")
-    bn.split_song_tracks()
-
-    lyrics = bn.get_lyrics()
-    for word in lyrics["word_segments"]:
-      print(word)

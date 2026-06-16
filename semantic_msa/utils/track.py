@@ -26,9 +26,6 @@ class Token:
     # TODO this will return the audio segment corresponding to the token, pydub to do this. it's not important for now
     pass
 
-  # TODO
-  def _get_DSP_features_LLM_representation(self):
-     pass
   # TODO  
   def _get_cue_data_LLM_representation(self):
      # just a placeholder. move it into cue_point.py
@@ -156,7 +153,6 @@ class Track:
     self.dsp_manager = DSPManager(audio_path = path, beats_per_token = beats_per_token)
     self.raw_cue_points = self._compute_raw_cue_points()
 
-    # self.dsp_features["bpm"] = self.dsp_manager.compute_global_bpm()
 
     # when we compute the token boundaries we find the phase offset that maximizes the score. the cue points are snapped to downbeats in a way that the mean score is maximized.
     self.best_beat_phase_offset = None
@@ -174,7 +170,6 @@ class Track:
     self.tokens = self._build_token_map()
 
     self.key = self.dsp_manager.compute_camelot_key(0, self.duration_ms)
-    self.bpm = None #TODO PLACEHOLDER
 
 
     # global vocal features 
@@ -191,6 +186,8 @@ class Track:
     from dsp_manager import VOCAL_START_END_BAR_WINDOW
     self.global_vocal_features["vocal_edge_window_bars"] = VOCAL_START_END_BAR_WINDOW
 
+    tokens_bpm = [token.dsp_features.get("BPM") for token in self.tokens if token.is_mixable and token.dsp_features.get("BPM") is not None]
+    self.bpm = self.dsp_manager.compute_global_bpm(cached_token_bpms=tokens_bpm)
 
   def _compute_raw_cue_points(self) -> list[RawCuePoint]:
     base_dir = Path(__file__).resolve().parent  # semantic_msa/utils
@@ -377,6 +374,7 @@ class Track:
       "name": self.name,
       "author": self.author,
       "key": self.key,
+      "bpm": self.bpm,
       "duration_ms": self.duration_ms,
       "token_size_beats": self.dsp_manager.beats_per_token,
       "best_beat_phase_offset": self.best_beat_phase_offset,
@@ -452,7 +450,7 @@ class Track:
         "author": self.author,
         "duration_ms": self.duration_ms,
         "token_size_beats": 16, # TODO change into "self.dsp_manager.beats_per_token", now it's not possible because of the quick and dirty load_from_cache method, refactor this later by splitting the constructors and the pipeline execution. this is just to have something working for the prototype
-        # TODO global dsp features.
+        # TODO global dsp features. (currently in profiler.py)
         "key": self.key,
         "bpm": self.bpm,
         "tokens": [token.LLM_representation() for token in self.tokens]
@@ -521,14 +519,11 @@ if __name__ == "__main__":
   for snapped_cue in track.snapped_cues:
       print(snapped_cue.json())
 
-  print("\n\n\n\n############ TOKENS ##############")
-  for token in track.tokens:
-      print(json.dumps(token.json(), indent = 4))
 
 
 
   print("\n\n\n\n############ FULL TRACK JSON ##############")
-  print(json.dumps(track.json(), indent = 4))
+  # print(json.dumps(track.json(), indent = 4))
 
   track_folder = Path(filename).stem
   full_json_path = repo_root / "data" / "json_db" / track_folder / "full.json"
@@ -540,7 +535,7 @@ if __name__ == "__main__":
   
 
   print("\n\n\n\n############ LLM REPRESENTATION ##############")
-  print(json.dumps(track.LLM_representation(), indent = 4))
+  # print(json.dumps(track.LLM_representation(), indent = 4))
 
   LLM_json_path = repo_root / "data" / "json_db" / track_folder / "LLM.json"
   with open(LLM_json_path, "w") as f:
