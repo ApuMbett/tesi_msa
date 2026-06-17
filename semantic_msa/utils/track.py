@@ -18,6 +18,7 @@ class Token:
     self.start_cue = start_cue
     self.end_cue = end_cue
 
+    self.tags = None
     self.caption = None # TODO this will be generated later by the captioning model, it's not important for now
     self.dsp_features = dsp_features # TODO this will hold the dsp features for the token, such as bpm, key, energy, etc. we can compute these later using the beatnet wrapper and other tools. it's not important for now
     self.lyrics = lyrics
@@ -72,7 +73,8 @@ class Token:
       "end_cue": self.end_cue.json() if self.end_cue else None,
       "caption": self.caption,
       "dsp_features": self.dsp_features,
-      "lyrics": self.lyrics
+      "lyrics": self.lyrics,
+      "tags": self.tags
     }
   # TODO refactor classes as dataclasses
   @classmethod
@@ -97,7 +99,8 @@ class Token:
       "end_cue": self.end_cue.json() if self.end_cue else None,
       "caption": self.caption,
       "dsp_features": self._get_dsp_features_LLM_representation(),
-      "lyrics": self._get_lyrics_LLM_representation() if self.lyrics else None
+      "lyrics": self._get_lyrics_LLM_representation() if self.lyrics else None,
+      "tags": self.tags
     }
   
   def _get_dsp_features_LLM_representation(self):
@@ -188,6 +191,23 @@ class Track:
 
     tokens_bpm = [token.dsp_features.get("BPM") for token in self.tokens if token.is_mixable and token.dsp_features.get("BPM") is not None]
     self.bpm = self.dsp_manager.compute_global_bpm(cached_token_bpms=tokens_bpm)
+
+    # generate token tags with TinyMU
+    _repo_root = Path(__file__).resolve().parents[2]  # .../utils -> .../semantic_msa -> root
+    if str(_repo_root) not in sys.path:
+        sys.path.insert(0, str(_repo_root))
+    from tagging_engine.tagger import Tagger
+
+    with Tagger(python311="python3.11", ) as tagger:   # model loads once here
+      for token in self.tokens:
+        token_audio_path = self.generate_token_audio(token.index)
+        print(f"Generated audio slice for token {token.index} at {token_audio_path}")
+
+        print(f"Generating tags for token {token.index} using TinyMU...")
+        tags = tagger.tag(token_audio_path)        # fast from here on
+        print(tags)  # ["electronic", "upbeat", "synthesizer", "120bpm"]
+        token.tags = tags
+      
 
   def _compute_raw_cue_points(self) -> list[RawCuePoint]:
     base_dir = Path(__file__).resolve().parent  # semantic_msa/utils
