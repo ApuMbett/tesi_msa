@@ -33,10 +33,10 @@ class TinyMUWorker(BaseWorker):
             response = self.model.generate(
                 samples=[(audio_path, prompt)],
                 max_len=50,
-                top_p=0.8,
-                temperature=0.7,
+                top_p=0.5,
+                temperature=0.3,
                 tokenizer=self.tokenizer,
-                strategy="greedy",
+                strategy="top-p",
                 device=self.device
             )
         

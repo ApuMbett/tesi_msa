@@ -45,11 +45,10 @@ class Tagger:
     def __init__(
         self,
         python311: str = "python3.11",
-        worker_script: "Optional[str | Path]" = None,
+        worker: "Optional[str]" = "tinymu",
         startup_timeout: float = 120.0,
     ) -> None:
-        if worker_script is None:
-            worker_script = Path(__file__).parent / "tinymu_worker.py"
+        worker_script = Path(__file__).parent / f"{worker}_worker.py"
         worker_script = Path(worker_script).resolve()
 
         if not worker_script.exists():

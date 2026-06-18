@@ -192,21 +192,8 @@ class Track:
     tokens_bpm = [token.dsp_features.get("BPM") for token in self.tokens if token.is_mixable and token.dsp_features.get("BPM") is not None]
     self.bpm = self.dsp_manager.compute_global_bpm(cached_token_bpms=tokens_bpm)
 
-    # generate token tags with TinyMU
-    _repo_root = Path(__file__).resolve().parents[2]  # .../utils -> .../semantic_msa -> root
-    if str(_repo_root) not in sys.path:
-        sys.path.insert(0, str(_repo_root))
-    from tagging_engine.tagger import Tagger
-
-    with Tagger(python311="python3.11", ) as tagger:   # model loads once here
-      for token in self.tokens:
-        token_audio_path = self.generate_token_audio(token.index)
-        print(f"Generated audio slice for token {token.index} at {token_audio_path}")
-
-        print(f"Generating tags for token {token.index} using TinyMU...")
-        tags = tagger.tag(token_audio_path)        # fast from here on
-        print(tags)  # ["electronic", "upbeat", "synthesizer", "120bpm"]
-        token.tags = tags
+    # self._generate_token_tags("tinymu")
+    # ^ TODO WIP, i have to test different models and see which one seems better
       
 
   def _compute_raw_cue_points(self) -> list[RawCuePoint]:
@@ -371,6 +358,24 @@ class Track:
     token_lyrics = [word for word in words if start_time_ms <= word["start"] * 1000 < end_time_ms]  # convert to ms and check if it falls within the token boundaries
     
     return token_lyrics
+  
+  def _generate_token_tags(self, model_name):
+    _repo_root = Path(__file__).resolve().parents[2]  # .../utils -> .../semantic_msa -> root
+    if str(_repo_root) not in sys.path:
+        sys.path.insert(0, str(_repo_root))
+    from tagging_engine.tagger import Tagger
+
+    with Tagger(python311="python3.11", worker="qwen") as tagger:   # model loads once here
+      for token in self.tokens:
+        token_audio_path = self.generate_token_audio(token.index)
+        print(f"Generated audio slice for token {token.index} at {token_audio_path}")
+
+        print(f"Generating tags for token {token.index} using TinyMU...")
+        tags = tagger.tag(token_audio_path)        # fast from here on
+        print(tags)  # ["electronic", "upbeat", "synthesizer", "120bpm"]
+        token.tags = tags
+        import time 
+        time.sleep(1.5) # to prevent rate limit from the API
 
 
   ##### SERIALIZATION AND LLM REPRESENTATION METHODS #####
