@@ -1,4 +1,3 @@
-from BeatNet.BeatNet import BeatNet
 import numpy as np
 from collections import Counter
 from functools import cached_property
@@ -15,6 +14,7 @@ SEMANTIC_MSA_DIR = BASE_DIR.parent
 REPO_ROOT = SEMANTIC_MSA_DIR.parent
 DATA_DIR = REPO_ROOT / "data"
 AUDIO_DIR = DATA_DIR / "raw_audio"
+BEATNET_ENGINE_DIR = REPO_ROOT / "beatnet_engine"
 
 VOCAL_THRESHOLD_FLOOR = 0.10 #  # If it's a pure instrumental track, both centers will be tiny so We enforce a hard floor so it doesn't hallucinate vocals in the noise.
 #Without the floor: The algorithm might find a "noise center" at 0.01 and a "vocal center" at 0.04. It will calculate a threshold of 0.0175, and suddenly the random hiss of an old vinyl sample or a mastering artifact will be flagged as an active human vocalist.
@@ -50,14 +50,21 @@ class DSPManager:
 
   @staticmethod
   def _compute_raw_data(workspace: TrackWorkspace):
-      estimator = BeatNet(1, mode='offline', inference_model='DBN', plot=[], thread=False)
-      data = estimator.process(str(workspace.source_audio_path))  
+      # We now call the isolated beatnet_engine
+      output_json = workspace.cache_dir / "_beat_grid.json"
+          
+      if not output_json.exists():
+          beatnet_python = BEATNET_ENGINE_DIR / ".venv" / "bin" / "python"
+          beatnet_wrapper = BEATNET_ENGINE_DIR / "beatnet_wrapper.py"
+          subprocess.run(
+              [str(beatnet_python), str(beatnet_wrapper), str(workspace.source_audio_path), str(output_json)],
+              check=True
+          )
       
-      return DSPManager._sanitize_raw_data(data)
-
-  @staticmethod
-  def _sanitize_raw_data(raw_data):
-      return [(int(time*1000), int(beat)) for time, beat in raw_data]
+      with open(output_json, "r") as f:
+          data = json.load(f)
+          
+      return [(int(time), int(beat)) for time, beat in data]
 
 
   def get_full_grid(self):
