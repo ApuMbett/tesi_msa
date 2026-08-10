@@ -221,20 +221,7 @@ class SyedRMSVad(Vad):
 # ==========================================
 # 3. MAIN EXECUTION
 # ==========================================
-if __name__ == "__main__":
-    # 1. Catch the audio file path passed by the DSPManager
-    if len(sys.argv) < 3:
-        print("Error: Not enough arguments provided.")
-        print("Usage: python whisper_wrapper.py <path_to_vocals.wav> <output_json_path>")
-        sys.exit(1)
-        
-    vocals_path = sys.argv[1]
-    output_filename = sys.argv[2]
-    
-    if not os.path.exists(vocals_path):
-        print(f"Error: Could not find audio file at {vocals_path}")
-        sys.exit(1)
-
+def transcribe_vocals(vocals_path: str) -> dict:
     # 2. Set up Device & Compute Type
     device = "cuda" if torch.cuda.is_available() else "cpu"
     compute_type = "float16" if device == "cuda" else "int8"
@@ -274,12 +261,4 @@ if __name__ == "__main__":
         return_char_alignments=False
     )
     
-    # 7. Write the output to a JSON file for the main thesis environment to read
-    os.makedirs(os.path.dirname(output_filename), exist_ok=True)
-    print(f"Saving exact timestamps to {output_filename}...")
-    print(json.dumps(aligned_result, indent=2))  # Debug: print the aligned result to console
-    
-    with open(output_filename, "w", encoding="utf-8") as f:
-        json.dump(aligned_result, f, ensure_ascii=False, indent=2)
-        
-    print("WhisperX Bridge Script completed successfully!")
+    return aligned_result

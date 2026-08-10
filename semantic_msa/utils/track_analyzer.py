@@ -52,8 +52,8 @@ class TrackAnalyzer:
         )
         global_vocal = dsp_manager._compute_DSP_vocal_features(0, duration_ms)
         global_vocal_features = {k: round(float(v), 4) for k, v in zip(edge_keys, global_vocal)}
-        global_vocal_features["vocal_density_threshold"] = round(dsp_manager.vocal_threshold, 4)
-        global_vocal_features["vocal_confidence_steepness"] = round(dsp_manager.vocal_confidence_steepness, 4)
+        global_vocal_features["vocal_density_threshold"] = round(float(dsp_manager.vocal_threshold), 4)
+        global_vocal_features["vocal_confidence_steepness"] = round(float(dsp_manager.vocal_confidence_steepness), 4)
         global_vocal_features["vocal_edge_window_bars"] = VOCAL_START_END_BAR_WINDOW
 
         tokens_bpm = [t.dsp_features.get("BPM") for t in tokens if t.is_mixable and t.dsp_features.get("BPM") is not None]
@@ -113,20 +113,22 @@ class TrackAnalyzer:
                 print("Recomputing cue points with the current sensitivity...")
             
             cue_points_path.parent.mkdir(parents=True, exist_ok=True)
-            cue_detr_python = cue_detr_dir / ".venv" / "bin" / "python"
-            subprocess.run(
-                [
-                    str(cue_detr_python),
-                    str(cue_detr_script),
-                    "--track-path",
-                    self.path,
-                    "--output-path",
-                    str(cue_points_path),
-                    "--sensitivity",
-                    str(CUE_DETR_SENSITIVITY),
-                ],
-                check=True,
+            from semantic_msa.adapters.cue_detr.extractor import _compute_cue_points
+            
+            cue_points_list = _compute_cue_points(
+                track_path=self.path,
+                checkpoint="disco-eth/cue-detr",
+                radius=16,
+                sensitivity=CUE_DETR_SENSITIVITY
             )
+            
+            payload = {
+                "sensitivity": CUE_DETR_SENSITIVITY,
+                "cue_points": cue_points_list,
+            }
+            with open(cue_points_path, "w") as f:
+                json.dump(payload, f, indent=4)
+                
             _, cue_points = _load_cue_payload(cue_points_path)
             print("Cue points computed and saved successfully.")
 

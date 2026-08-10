@@ -422,8 +422,6 @@ class DSPManager:
     self.split_song_tracks()
 
     # 2. run WhisperX on the vocal track with custom VAD (RMS-VAD, Syed et al) to get the lyrics with timestamps. 
-    # 2. Load the main Whisper into memory 
-    # i run it as a subprocess because it's easier to manage the dependencies 
     if self.workspace:
         output_json_path = self.workspace.cache_dir / "_whisper_output.json"
         vocal_path = self.workspace.stems_dir / "vocals.wav"
@@ -432,17 +430,18 @@ class DSPManager:
         vocal_path = AUDIO_DIR / "htdemucs" / self.track_name / "vocals.wav"
 
     if not output_json_path.exists():
-      whisper_env_python = REPO_ROOT / "whisper_engine" / ".venv" / "bin" / "python"  # Path to the Python executable in the whisper environment
-      whisper_wrapper = REPO_ROOT / "whisper_engine" / "whisper_wrapper.py"
-      command = [str(whisper_env_python), str(whisper_wrapper), str(vocal_path), str(output_json_path)]
-      subprocess.run(command, check=True, )
-      # Read the JSON file left behind by the bridge script
-      print("Transcription complete. Ingesting timestamp data...")
-      if not output_json_path.exists():
-          raise FileNotFoundError("WhisperX finished, but no JSON output was found!")
-
-    with open(output_json_path, "r", encoding="utf-8") as f:
-        lyrics_data = json.load(f)
+      from semantic_msa.adapters.whisper_engine.transcriber import transcribe_vocals
+      
+      print("Transcription starting natively...")
+      lyrics_data = transcribe_vocals(str(vocal_path))
+      
+      print(f"Saving exact timestamps to {output_json_path}...")
+      output_json_path.parent.mkdir(parents=True, exist_ok=True)
+      with open(output_json_path, "w", encoding="utf-8") as f:
+          json.dump(lyrics_data, f, ensure_ascii=False, indent=2)
+    else:
+      with open(output_json_path, "r", encoding="utf-8") as f:
+          lyrics_data = json.load(f)
 
     return lyrics_data
 
