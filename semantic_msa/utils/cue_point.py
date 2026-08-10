@@ -19,6 +19,13 @@ class RawCuePoint:
           "confidence_score": self.score,
         }
     # TODO refactor classes as dataclasses
+
+    def LLM_representation(self):
+        return {
+          "time_ms": self.time,
+          "confidence_score": round(self.score, 2)
+        }
+
     @classmethod
     def from_dict(cls, data: dict):
         """
@@ -144,6 +151,14 @@ class SnappedCuePoint:
           "displacement_error_ms": self.error,
           "quantization_error_ratio": self.quantization_error_ratio,
           "adjusted_confidence_score": self.score,
+        }
+    def LLM_representation(self):
+        return {
+          "raw_cue_point": self.raw.LLM_representation(),
+          "snapped_time_ms": self.time,
+          "displacement_error_ms": self.error,
+          "quantization_error_ratio": round(self.quantization_error_ratio, 2),
+          "adjusted_confidence_score": round(self.score, 2),
         }
     
     # TODO refactor classes as dataclasses

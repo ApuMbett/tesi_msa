@@ -95,8 +95,8 @@ class Token:
       "start_time_ms": self.start_time_ms,
       "end_time_ms": self.end_time_ms,
       "is_mixable": self.is_mixable,
-      "start_cue": self.start_cue.json() if self.start_cue else None,
-      "end_cue": self.end_cue.json() if self.end_cue else None,
+      "start_cue": self.start_cue.LLM_representation() if self.start_cue else None,
+      "end_cue": self.end_cue.LLM_representation() if self.end_cue else None,
       "caption": self.caption,
       "dsp_features": self._get_dsp_features_LLM_representation(),
       "lyrics": self._get_lyrics_LLM_representation() if self.lyrics else None,
@@ -263,11 +263,11 @@ class Track:
             self.token_boundaries = self.dsp_manager.get_semantic_audio_token_boundaries(downbeat_offset_to_skip = i)
             #!^ problem: token boundaries now include tail and intro pad, this was necessary for completeness. now we can move this to the track class, this is necessary because (see blablabla) we have the micro intro pad that has 8000 bpm and so the qer is very high. even though it's few ms 
         
-        print(f"\n\n\n\n######## Phase offset {i}: mean score={mean_cue_score} ########") 
-        print(F"token boundaries={self.token_boundaries}") 
-        print("Snapped Cue Points for this phase offset:")
-        for snapped_cue in snapped_cues:
-            print(snapped_cue.json())
+        # print(f"\n\n\n\n######## Phase offset {i}: mean score={mean_cue_score} ########") 
+        # print(F"token boundaries={self.token_boundaries}") 
+        # print("Snapped Cue Points for this phase offset:")
+        # for snapped_cue in snapped_cues:
+        #     print(snapped_cue.json())
 
   def _build_token_map(self) -> list[Token]:
     boundaries = [b for b in self.token_boundaries]  # Make a copy to avoid modifying the original list of token boundaries
