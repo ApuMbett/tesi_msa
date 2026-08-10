@@ -5,6 +5,7 @@ import sys
 
 from semantic_msa.utils.dsp_manager import DSPManager, VOCAL_START_END_BAR_WINDOW
 from semantic_msa.domain.models import Track, Token, RawCuePoint, SnappedCuePoint
+from semantic_msa.domain.workspace import TrackWorkspace
 
 CUE_DETR_SENSITIVITY = 0.85
 STRUCTURAL_PENALTY_WEIGHT = 0.5
@@ -15,16 +16,17 @@ class TrackAnalyzer:
     Orchestrates the extraction pipeline to build a Track DTO.
     Handles external subprocesses (Cue-DETR, Whisper, Demucs) and delegates DSP math to DSPManager.
     """
-    def __init__(self, path: str, name: str, author: str, beats_per_token: int = 16, structural_penalty_weight: float = STRUCTURAL_PENALTY_WEIGHT):
-        self.path = path
-        self.name = name
+    def __init__(self, workspace: TrackWorkspace, author: str, beats_per_token: int = 16, structural_penalty_weight: float = STRUCTURAL_PENALTY_WEIGHT):
+        self.workspace = workspace
+        self.path = str(workspace.source_audio_path)
+        self.name = workspace.track_name
         self.author = author
         self.beats_per_token = beats_per_token
         # this weight determines how much the quantization error ratio will affect the final score, allowing for tuning based on how strict we want to be about structural alignment versus raw confidence. between 0 and 1, where 0 means no penalty and 1 means full penalty based on the quantization error ratio. when 1 the structural alignment has maximum importance, when 0 the raw confidence score has maximum importance.
         self.structural_penalty_weight = structural_penalty_weight
 
     def extract(self) -> Track:
-        dsp_manager = DSPManager(audio_path=self.path, beats_per_token=self.beats_per_token)
+        dsp_manager = DSPManager(audio_path=self.path, beats_per_token=self.beats_per_token, workspace=self.workspace)
         
         # 1. Get raw cue points via subprocess
         raw_cues = self._compute_raw_cue_points()
@@ -82,12 +84,10 @@ class TrackAnalyzer:
     def _compute_raw_cue_points(self) -> list[RawCuePoint]:
         base_dir = Path(__file__).resolve().parent  # semantic_msa/utils
         semantic_msa_dir = base_dir.parent
-        repo_root = semantic_msa_dir.parent
 
         cue_detr_dir = semantic_msa_dir / "externals" / "cue-detr"
         cue_detr_script = cue_detr_dir / "cue_points_single_track.py"
-        track_folder = Path(self.name).stem
-        cue_points_path = repo_root / "data" / "json_db" / track_folder / "_cue_points.json"
+        cue_points_path = self.workspace.cache_dir / "_cue_points.json"
 
         def _load_cue_payload(path: Path):
             with open(path, "r") as f:
@@ -118,8 +118,10 @@ class TrackAnalyzer:
                 [
                     str(cue_detr_python),
                     str(cue_detr_script),
-                    "--track-name",
-                    self.name,
+                    "--track-path",
+                    self.path,
+                    "--output-path",
+                    str(cue_points_path),
                     "--sensitivity",
                     str(CUE_DETR_SENSITIVITY),
                 ],
@@ -324,22 +326,22 @@ class TrackAnalyzer:
             raise ValueError("Invalid token index")
 
         token = tokens[token_index]
-        repo_root = Path(__file__).resolve().parent.parent.parent
-        track_folder = Path(self.name).stem
-        tokens_dir = repo_root / "data" / "raw_audio" / track_folder / "tokens"
-        tokens_dir.mkdir(parents=True, exist_ok=True)
-
-        output_path = tokens_dir / f"{token_index}.wav"
+        output_path = self.workspace.tokens_dir / f"{token_index}.wav"
         dsp_manager.generate_audio_slice(token.start_time_ms, token.end_time_ms, str(output_path))
         return str(output_path)
 
 if __name__ == "__main__":
     import sys
     filename = sys.argv[1] if len(sys.argv) > 1 else "blablabla.mp3"
-    repo_root = Path(__file__).resolve().parent.parent.parent
-    audio_path = repo_root / "data" / "raw_audio" / filename
     
-    analyzer = TrackAnalyzer(path=str(audio_path), name=filename, author="unknown")
+    # We still need repo_root to locate the original mp3 if it's in data/raw_audio
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    original_audio = repo_root / "data" / "raw_audio" / filename
+    
+    workspace = TrackWorkspace(track_name=Path(filename).stem, original_audio_path=original_audio)
+    workspace.setup()
+    
+    analyzer = TrackAnalyzer(workspace=workspace, author="unknown")
     track = analyzer.extract()
     
     print("\n\n\n\n############ BEST ##############")
@@ -351,19 +353,13 @@ if __name__ == "__main__":
         print(snapped_cue.json())
 
     print("\n\n\n\n############ FULL TRACK JSON ##############")
-    # print(json.dumps(track.json(), indent = 4))
-
-    track_folder = Path(filename).stem
-    full_json_path = repo_root / "data" / "json_db" / track_folder / "full.json"
-    full_json_path.parent.mkdir(parents=True, exist_ok=True)
+    full_json_path = workspace.output_dir / "full.json"
     with open(full_json_path, "w") as f:
         f.write(track.model_dump_json(indent=4, by_alias=True))
     print(f"Full track JSON saved to {full_json_path}")
 
     print("\n\n\n\n############ LLM REPRESENTATION ##############")
-    # print(json.dumps(track.LLM_representation(), indent = 4))
-
-    LLM_json_path = repo_root / "data" / "json_db" / track_folder / "LLM.json"
+    LLM_json_path = workspace.output_dir / "LLM.json"
     with open(LLM_json_path, "w") as f:
         json.dump(track.LLM_representation(), f, indent=4)
     print(f"LLM representation JSON saved to {LLM_json_path}")

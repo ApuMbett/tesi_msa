@@ -8,6 +8,7 @@ import subprocess
 import json
 from pathlib import Path
 from scipy.stats import pearsonr
+from semantic_msa.domain.workspace import TrackWorkspace
 
 BASE_DIR = Path(__file__).resolve().parent  # semantic_msa/utils
 SEMANTIC_MSA_DIR = BASE_DIR.parent
@@ -35,8 +36,9 @@ class DSPManager:
   """
     Wrapper around BeatNet to extract beat grid information and convert it to a format suitable for our application. This class can be initialized with either raw BeatNet output or an audio file path, and provides methods to retrieve the full beat grid, downbeats, pixel boundaries for blocks of bars, and both global and local BPM estimates. 
   """
-  def __init__(self, audio_path, beats_per_token = 16):
+  def __init__(self, audio_path, beats_per_token = 16, workspace: TrackWorkspace = None):
     self.beats_per_token = beats_per_token
+    self.workspace = workspace
     self.beats = DSPManager._compute_raw_data(audio_path)
 
     # loading the track into memory using librosa, useful for low level DSP features computing 
@@ -44,7 +46,7 @@ class DSPManager:
     self.y = None 
     self.y, self.sr = librosa.load(audio_path, sr=self.sr)
     self.audio_path = audio_path
-    self.track_name = audio_path.split("/")[-1].split(".")[0]    
+    self.track_name = workspace.track_name if workspace else audio_path.split("/")[-1].split(".")[0]    
     
 
   @staticmethod
@@ -366,8 +368,13 @@ class DSPManager:
     if not self.has_splitted_tracks():
       self.split_song_tracks()
 
-    vocal_path = AUDIO_DIR / "htdemucs" / self.track_name / "vocals.wav"
-    instrumental_path = AUDIO_DIR / "htdemucs" / self.track_name / "no_vocals.wav"
+    if self.workspace:
+      vocal_path = self.workspace.stems_dir / "vocals.wav"
+      instrumental_path = self.workspace.stems_dir / "no_vocals.wav"
+    else:
+      vocal_path = AUDIO_DIR / "htdemucs" / self.track_name / "vocals.wav"
+      instrumental_path = AUDIO_DIR / "htdemucs" / self.track_name / "no_vocals.wav"
+
     y_vocal, _ = librosa.load(vocal_path, sr=self.sr)
     y_instrumental, _ = librosa.load(instrumental_path, sr=self.sr)
     
@@ -380,12 +387,25 @@ class DSPManager:
       # run demucs and save the vocal and instrumental tracks in memory for later use.
       print(f"[Demucs] Extracting vocals for {self.audio_path}...")
 
-      command = ["demucs", "--two-stems=vocals", "-o", str(AUDIO_DIR), self.audio_path]
+      out_dir = self.workspace.stems_dir.parent if self.workspace else AUDIO_DIR
+      command = ["demucs", "--two-stems=vocals", "-n", "htdemucs", "-o", str(out_dir), self.audio_path]
       subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
+
+      if self.workspace:
+          # Demucs creates out_dir / "htdemucs" / track_name / "vocals.wav"
+          demucs_out = out_dir / "htdemucs" / self.track_name
+          if demucs_out.exists():
+              for f in demucs_out.glob("*.wav"):
+                  f.rename(self.workspace.stems_dir / f.name)
+              import shutil
+              shutil.rmtree(out_dir / "htdemucs")
   
   def has_splitted_tracks(self):
     # this method checks if the song has already been splitted into vocal and instrumental tracks, to avoid doing it multiple times. 
-    expected_vocal_path = AUDIO_DIR / "htdemucs" / self.track_name / "vocals.wav"
+    if self.workspace:
+        expected_vocal_path = self.workspace.stems_dir / "vocals.wav"
+    else:
+        expected_vocal_path = AUDIO_DIR / "htdemucs" / self.track_name / "vocals.wav"
     return expected_vocal_path.exists()
 
   #TODO don't know if this is the right place for these methods but for now it's easier to implement them here since they are related to the DSP features of the track, we can refactor later if needed.
@@ -399,12 +419,17 @@ class DSPManager:
     # 2. run WhisperX on the vocal track with custom VAD (RMS-VAD, Syed et al) to get the lyrics with timestamps. 
     # 2. Load the main Whisper into memory 
     # i run it as a subprocess because it's easier to manage the dependencies 
-    output_json_path = DATA_DIR / "json_db" / self.track_name / "_whisper_output.json"
+    if self.workspace:
+        output_json_path = self.workspace.cache_dir / "_whisper_output.json"
+        vocal_path = self.workspace.stems_dir / "vocals.wav"
+    else:
+        output_json_path = DATA_DIR / "json_db" / self.track_name / "_whisper_output.json"
+        vocal_path = AUDIO_DIR / "htdemucs" / self.track_name / "vocals.wav"
+
     if not output_json_path.exists():
-      vocal_path = AUDIO_DIR / "htdemucs" / self.track_name / "vocals.wav"
       whisper_env_python = REPO_ROOT / "whisper_engine" / ".venv" / "bin" / "python"  # Path to the Python executable in the whisper environment
       whisper_wrapper = REPO_ROOT / "whisper_engine" / "whisper_wrapper.py"
-      command = [str(whisper_env_python), str(whisper_wrapper), str(vocal_path)]
+      command = [str(whisper_env_python), str(whisper_wrapper), str(vocal_path), str(output_json_path)]
       subprocess.run(command, check=True, )
       # Read the JSON file left behind by the bridge script
       print("Transcription complete. Ingesting timestamp data...")
@@ -519,7 +544,10 @@ class DSPManager:
     plt.xlabel("Vocal Energy Dominance Ratio (VED)")
     plt.ylabel("Number of Frames (100ms)")
     plt.legend()
-    output_dir = DATA_DIR / "json_db" / self.track_name
+    if self.workspace:
+        output_dir = self.workspace.cache_dir
+    else:
+        output_dir = DATA_DIR / "json_db" / self.track_name
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / "vocal_threshold_distribution.png"
     plt.tight_layout()

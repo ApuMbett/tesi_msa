@@ -223,12 +223,13 @@ class SyedRMSVad(Vad):
 # ==========================================
 if __name__ == "__main__":
     # 1. Catch the audio file path passed by the DSPManager
-    if len(sys.argv) < 2:
-        print("Error: No audio file provided.")
-        print("Usage: python run_custom_whisper.py <path_to_vocals.wav>")
+    if len(sys.argv) < 3:
+        print("Error: Not enough arguments provided.")
+        print("Usage: python whisper_wrapper.py <path_to_vocals.wav> <output_json_path>")
         sys.exit(1)
         
     vocals_path = sys.argv[1]
+    output_filename = sys.argv[2]
     
     if not os.path.exists(vocals_path):
         print(f"Error: Could not find audio file at {vocals_path}")
@@ -274,10 +275,7 @@ if __name__ == "__main__":
     )
     
     # 7. Write the output to a JSON file for the main thesis environment to read
-    track_name = vocals_path.split("/")[-2]  
-    # create the output directory if it doesn't exist
-    os.makedirs(f"../data/json_db/{track_name}", exist_ok=True)
-    output_filename = f"../data/json_db/{track_name}/_whisper_output.json"
+    os.makedirs(os.path.dirname(output_filename), exist_ok=True)
     print(f"Saving exact timestamps to {output_filename}...")
     print(json.dumps(aligned_result, indent=2))  # Debug: print the aligned result to console
     
