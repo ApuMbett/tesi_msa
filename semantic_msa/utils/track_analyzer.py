@@ -26,7 +26,7 @@ class TrackAnalyzer:
         self.structural_penalty_weight = structural_penalty_weight
 
     def extract(self) -> Track:
-        dsp_manager = DSPManager(audio_path=self.path, beats_per_token=self.beats_per_token, workspace=self.workspace)
+        dsp_manager = DSPManager(workspace=self.workspace, beats_per_token=self.beats_per_token)
         
         # 1. Get raw cue points via subprocess
         raw_cues = self._compute_raw_cue_points()

@@ -36,31 +36,29 @@ class DSPManager:
   """
     Wrapper around BeatNet to extract beat grid information and convert it to a format suitable for our application. This class can be initialized with either raw BeatNet output or an audio file path, and provides methods to retrieve the full beat grid, downbeats, pixel boundaries for blocks of bars, and both global and local BPM estimates. 
   """
-  def __init__(self, audio_path, beats_per_token = 16, workspace: TrackWorkspace = None):
+  def __init__(self, workspace: TrackWorkspace, beats_per_token = 16):
     self.beats_per_token = beats_per_token
     self.workspace = workspace
-    self.beats = DSPManager._compute_raw_data(audio_path)
+    self.audio_path = str(workspace.source_audio_path)
+    self.track_name = workspace.track_name
+    
+    self.beats = DSPManager._compute_raw_data(workspace)
 
     # loading the track into memory using librosa, useful for low level DSP features computing 
     self.sr = 22050  # Standard sampling rate for audio processing
-    self.y = None 
-    self.y, self.sr = librosa.load(audio_path, sr=self.sr)
-    self.audio_path = audio_path
-    self.track_name = workspace.track_name if workspace else audio_path.split("/")[-1].split(".")[0]    
-    
+    self.y, self.sr = librosa.load(self.audio_path, sr=self.sr)
 
   @staticmethod
-  def _compute_raw_data(audio_path):
-    estimator = BeatNet(1, mode='offline', inference_model='DBN', plot=[], thread=False)
-    data = estimator.process(audio_path)  
-    
-    return DSPManager._sanitize_raw_data(data)
+  def _compute_raw_data(workspace: TrackWorkspace):
+      estimator = BeatNet(1, mode='offline', inference_model='DBN', plot=[], thread=False)
+      data = estimator.process(str(workspace.source_audio_path))  
+      
+      return DSPManager._sanitize_raw_data(data)
 
   @staticmethod
   def _sanitize_raw_data(raw_data):
       return [(int(time*1000), int(beat)) for time, beat in raw_data]
-      # return [(time, int(beat)) for time, beat in raw_data]
-  
+
 
   def get_full_grid(self):
     return self.beats
@@ -584,8 +582,10 @@ if __name__ == "__main__":
     print("started beatnet wrapper test")
     # resolve path 
     path = DATA_DIR / "raw_audio" / "vielleicht.mp3"
+    
+    workspace = TrackWorkspace(track_name="vielleicht", original_audio_path=path)
 
-    bn = DSPManager(audio_path = str(path))
+    bn = DSPManager(workspace=workspace)
 
     print("full grid:", bn.get_full_grid())
     print("downbeats:", bn.get_downbeats())
