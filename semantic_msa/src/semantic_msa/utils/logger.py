@@ -93,5 +93,9 @@ class Logger:
         """Semantic wrapper for parameter logging (logs as INFO with a magenta dot)"""
         self.logger.info(f"[bold magenta][PARAM] •[/bold magenta] {msg}", *args, **kwargs, extra={"markup": True, "category": "PARAM"})
 
+    def error(self, msg, *args, **kwargs):
+        """Semantic wrapper for errors (logs as ERROR with a red X)"""
+        self.logger.error(f"[bold red][ERROR] ✖[/bold red] {msg}", *args, **kwargs, extra={"markup": True, "category": "ERROR"})
+
 # Global singleton logger instance
 logger = Logger()
