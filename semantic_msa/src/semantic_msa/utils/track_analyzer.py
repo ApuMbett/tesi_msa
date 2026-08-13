@@ -26,7 +26,17 @@ class TrackAnalyzer:
         self.structural_penalty_weight = structural_penalty_weight
 
     def extract(self) -> Track:
+        print("Running pipeline health checks...")
+        from semantic_msa.adapters.whisper_engine.transcriber import check_health as check_whisper
+        from semantic_msa.adapters.cue_detr.extractor import check_health as check_cue_detr
+        
+        check_whisper()
+        check_cue_detr()
+        
+        # dsp_manager handles Beatnet and Demucs checks
         dsp_manager = DSPManager(workspace=self.workspace, beats_per_token=self.beats_per_token)
+        dsp_manager.check_health()
+        print("Health checks passed. Starting extraction...")
         
         # 1. Get raw cue points via subprocess
         raw_cues = self._compute_raw_cue_points()

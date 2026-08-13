@@ -221,6 +221,19 @@ class SyedRMSVad(Vad):
 # ==========================================
 # 3. MAIN EXECUTION
 # ==========================================
+def check_health() -> None:
+    """Verifies that the WhisperX environment and model dependencies are correctly installed."""
+    try:
+        import whisperx
+        import torch
+    except ImportError as e:
+        raise RuntimeError(
+            f"WhisperX dependency missing: {e}. "
+            "Please ensure you have installed whisperx manually with:\n"
+            "uv pip install git+https://github.com/m-bain/whisperx.git@2cfd7b7c5c7bba144954364db747319b50e8232b\n"
+            "and that you are running the project using `uv run --no-sync`."
+        ) from e
+
 def transcribe_vocals(vocals_path: str) -> dict:
     # 2. Set up Device & Compute Type
     device = "cuda" if torch.cuda.is_available() else "cpu"

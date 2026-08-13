@@ -49,6 +49,19 @@ class DSPManager:
     self.sr = 22050  # Standard sampling rate for audio processing
     self.y, self.sr = librosa.load(self.audio_path, sr=self.sr)
 
+  def check_health(self) -> None:
+      """Verifies that Demucs and Beatnet Engine are available before processing."""
+      import shutil
+      if shutil.which("demucs") is None:
+          raise RuntimeError("Demucs is not installed or not in PATH. Please install it.")
+          
+      beatnet_python = BEATNET_ENGINE_DIR / ".venv" / "bin" / "python"
+      if not beatnet_python.exists():
+          raise RuntimeError(
+              f"Beatnet Engine virtual environment not found at {beatnet_python}. "
+              "Please set it up by running `uv venv` and installing dependencies in the beatnet_engine directory."
+          )
+
   @staticmethod
   def _compute_raw_data(workspace: TrackWorkspace):
       # We now call the isolated beatnet_engine

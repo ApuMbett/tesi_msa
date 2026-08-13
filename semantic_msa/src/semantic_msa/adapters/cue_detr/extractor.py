@@ -19,6 +19,14 @@ PADDING = 266
 
 # (removed hardcoded path builders)
 
+def check_health() -> None:
+    """Verifies that Cue-DETR dependencies are installed."""
+    try:
+        import torch
+        from transformers import DetrImageProcessor, DetrForObjectDetection
+    except ImportError as e:
+        raise RuntimeError(f"Cue-DETR dependency missing: {e}") from e
+
 def _compute_cue_points(track_path: Path, checkpoint: str, radius: int, sensitivity: float) -> list[dict[str, float]]:
     scale = lambda x: (x - np.min(x)) / (np.max(x) - np.min(x))
 
