@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from scipy.stats import pearsonr
 from semantic_msa.domain.workspace import TrackWorkspace
+from semantic_msa.utils.logger import logger
 
 BASE_DIR = Path(__file__).resolve().parent
 SEMANTIC_MSA_DIR = BASE_DIR.parent
@@ -47,6 +48,7 @@ class DSPManager:
 
     # loading the track into memory using librosa, useful for low level DSP features computing 
     self.sr = 22050  # Standard sampling rate for audio processing
+    logger.info(f"Loading raw audio into librosa memory (sr={self.sr})...")
     self.y, self.sr = librosa.load(self.audio_path, sr=self.sr)
 
   def check_health(self) -> None:
@@ -64,6 +66,7 @@ class DSPManager:
 
   @staticmethod
   def _compute_raw_data(workspace: TrackWorkspace):
+      logger.info(f"Retrieving raw BeatNet grid for {workspace.track_name}...")
       # We now call the isolated beatnet_engine
       output_json = workspace.cache_dir / "_beat_grid.json"
           
@@ -74,9 +77,14 @@ class DSPManager:
               [str(beatnet_python), str(beatnet_wrapper), str(workspace.source_audio_path), str(output_json)],
               check=True
           )
+      else:
+          logger.cache(f"BeatNet grid already exists for {workspace.track_name}, loading from cache...")
       
       with open(output_json, "r") as f:
           data = json.load(f)
+      
+      if output_json.exists():
+          logger.success("BeatNet grid loaded successfully.")
           
       return [(int(time), int(beat)) for time, beat in data]
 
@@ -121,6 +129,7 @@ class DSPManager:
       and extreme syncopated outliers (Schreiber et al., 2020).
       """
       token_boundaries = self.get_semantic_audio_token_boundaries()
+      logger.info("Computing global BPM via exact majority bin consensus...")
       bpm_estimates = cached_token_bpms if cached_token_bpms is not None else []
       if not cached_token_bpms:
         for i in range(len(token_boundaries)-1):
@@ -404,7 +413,7 @@ class DSPManager:
     # this method splits the song into vocal and instrumental tracks using Demucs. 
     if not self.has_splitted_tracks():
       # run demucs and save the vocal and instrumental tracks in memory for later use.
-      print(f"[Demucs] Extracting vocals for {self.audio_path}...")
+      logger.info(f"[Demucs] Extracting vocals for {self.audio_path}...")
 
       out_dir = self.workspace.stems_dir.parent if self.workspace else AUDIO_DIR
       command = ["demucs", "--two-stems=vocals", "-n", "htdemucs", "-o", str(out_dir), self.audio_path]
@@ -446,16 +455,18 @@ class DSPManager:
     if not output_json_path.exists():
       from semantic_msa.adapters.whisper_engine.transcriber import transcribe_vocals
       
-      print("Transcription starting natively...")
+      logger.info("Transcription starting natively...")
       lyrics_data = transcribe_vocals(str(vocal_path))
       
-      print(f"Saving exact timestamps to {output_json_path}...")
+      logger.info(f"Saving exact timestamps to {output_json_path}...")
       output_json_path.parent.mkdir(parents=True, exist_ok=True)
       with open(output_json_path, "w", encoding="utf-8") as f:
           json.dump(lyrics_data, f, ensure_ascii=False, indent=2)
     else:
+      logger.cache(f"Precise vocal timestamps already exist, loading from cache...")
       with open(output_json_path, "r", encoding="utf-8") as f:
           lyrics_data = json.load(f)
+      logger.success("Vocal timestamps loaded successfully.")
 
     return lyrics_data
 
@@ -504,6 +515,7 @@ class DSPManager:
   @cached_property
   def vocal_threshold(self):
       """Calculates a dynamic threshold using Bimodal Clustering on the whole track."""
+      logger.info("Running K-Means bimodal clustering to find vocal/noise centroids...")
       noise_center, vocal_center, VEDs = self.noise_vocal_kmeans
       # The threshold is the valley directly between them
       # Bias the threshold closer to the noise floor (VOCAL_THRESHOLD_GEOMETRIC_BIAS% mark)
@@ -519,6 +531,7 @@ class DSPManager:
 
   @cached_property
   def noise_vocal_kmeans(self):
+    logger.info("Extracting frame-level Vocal Energy Dominance for the entire track...")
     y_vocal, y_instrumental = self.y_split
     # Calculate VED for the whole song (see the calculation of VED for reference)
     VEDs = self._compute_VED_for_windows(y_vocal, y_instrumental)

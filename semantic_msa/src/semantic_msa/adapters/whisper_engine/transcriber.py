@@ -7,6 +7,7 @@ import numpy as np
 import librosa
 from typing import Tuple
 from whisperx.vads.vad import Vad
+from semantic_msa.utils.logger import logger
 
 # ==========================================
 # We will define the custom SyedRMSVad class here later!
@@ -240,7 +241,7 @@ def transcribe_vocals(vocals_path: str) -> dict:
     compute_type = "float16" if device == "cuda" else "int8"
 
     # 3. Load WhisperX Model
-    print(f"Loading WhisperX (large-v2) on {device}...")
+    logger.step(f"Loading WhisperX (large-v2) on {device}...")
     my_vad = SyedRMSVad()
     whisper_model = whisperx.load_model(
         "large-v2", 
@@ -248,18 +249,18 @@ def transcribe_vocals(vocals_path: str) -> dict:
         compute_type=compute_type,
         vad_model=my_vad
     )
-    print("Model loaded successfully.")
+    logger.success("Model loaded successfully.")
 
     # 4. Load Audio
-    print(f"Loading audio: {vocals_path}")
+    logger.step(f"Loading audio: {vocals_path}")
     audio = whisperx.load_audio(vocals_path)
     
     # 5. Base Transcription
-    print("Running transcription...")
+    logger.step("Running transcription...")
     result = whisper_model.transcribe(audio, batch_size=16)
     
     # 6. Forced Alignment (Word-level timestamps)
-    print("Running forced alignment for DJ grid precision...")
+    logger.step("Running forced alignment for DJ grid precision...")
     align_model, metadata = whisperx.load_align_model(
         language_code=result["language"], 
         device=device

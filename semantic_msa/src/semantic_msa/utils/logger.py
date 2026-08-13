@@ -3,6 +3,18 @@ import sys
 from pathlib import Path
 from rich.logging import RichHandler
 from rich.console import Console
+from rich.text import Text
+
+class PlainTextFormatter(logging.Formatter):
+    """Strips rich markup tags (like [bold blue]) before writing to a file."""
+    def format(self, record):
+        import copy
+        record_copy = copy.copy(record)
+            
+        if isinstance(record_copy.msg, str):
+            record_copy.msg = Text.from_markup(record_copy.msg).plain
+            
+        return super().format(record_copy)
 
 # Shared console for rich
 console = Console()
@@ -42,8 +54,8 @@ class Logger:
         file_handler = logging.FileHandler(log_file, encoding="utf-8")
         file_handler.setLevel(logging.INFO)
         
-        # Use a standard text formatter for the file
-        formatter = logging.Formatter(
+        # Use the custom formatter to strip markup tags
+        formatter = PlainTextFormatter(
             "%(asctime)s [%(levelname)s] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S"
         )
@@ -67,11 +79,19 @@ class Logger:
 
     def success(self, msg, *args, **kwargs):
         """Semantic wrapper for successful steps (logs as INFO with a green checkmark)"""
-        self.logger.info(f"[bold green]✔[/bold green] {msg}", *args, **kwargs, extra={"markup": True})
+        self.logger.info(f"[bold green][SUCCESS] ✔[/bold green] {msg}", *args, **kwargs, extra={"markup": True, "category": "SUCCESS"})
         
     def step(self, msg, *args, **kwargs):
         """Semantic wrapper for starting a step (logs as INFO with a blue arrow)"""
-        self.logger.info(f"[bold blue]➔[/bold blue] {msg}", *args, **kwargs, extra={"markup": True})
+        self.logger.info(f"[bold blue][STEP] ➔[/bold blue] {msg}", *args, **kwargs, extra={"markup": True, "category": "STEP"})
+
+    def cache(self, msg, *args, **kwargs):
+        """Semantic wrapper for cache hits (logs as INFO with a yellow refresh icon)"""
+        self.logger.info(f"[bold yellow][CACHE] ⟳[/bold yellow] {msg}", *args, **kwargs, extra={"markup": True, "category": "CACHE"})
+
+    def param(self, msg, *args, **kwargs):
+        """Semantic wrapper for parameter logging (logs as INFO with a magenta dot)"""
+        self.logger.info(f"[bold magenta][PARAM] •[/bold magenta] {msg}", *args, **kwargs, extra={"markup": True, "category": "PARAM"})
 
 # Global singleton logger instance
 logger = Logger()

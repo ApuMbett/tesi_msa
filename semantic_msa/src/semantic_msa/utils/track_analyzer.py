@@ -6,6 +6,7 @@ import sys
 from semantic_msa.utils.dsp_manager import DSPManager, VOCAL_START_END_BAR_WINDOW
 from semantic_msa.domain.models import Track, Token, RawCuePoint, SnappedCuePoint
 from semantic_msa.domain.workspace import TrackWorkspace
+from semantic_msa.utils.logger import logger
 
 CUE_DETR_SENSITIVITY = 0.85
 STRUCTURAL_PENALTY_WEIGHT = 0.5
@@ -26,7 +27,7 @@ class TrackAnalyzer:
         self.structural_penalty_weight = structural_penalty_weight
 
     def extract(self) -> Track:
-        print("Running pipeline health checks...")
+        logger.step("Running pipeline health checks...")
         from semantic_msa.adapters.whisper_engine.transcriber import check_health as check_whisper
         from semantic_msa.adapters.cue_detr.extractor import check_health as check_cue_detr
         
@@ -36,24 +37,40 @@ class TrackAnalyzer:
         # dsp_manager handles Beatnet and Demucs checks
         dsp_manager = DSPManager(workspace=self.workspace, beats_per_token=self.beats_per_token)
         dsp_manager.check_health()
-        print("Health checks passed. Starting extraction...")
-        
-        # 1. Get raw cue points via subprocess
-        raw_cues = self._compute_raw_cue_points()
+        logger.success("Health checks passed. Starting extraction...")
 
+        # Log parameters
+        logger.param(f"CUE_DETR_SENSITIVITY = {CUE_DETR_SENSITIVITY}")
+        logger.param(f"STRUCTURAL_PENALTY_WEIGHT = {self.structural_penalty_weight}")
+        logger.param(f"PSYCHOACUSTIC_THRESHOLD_MS = {PSYCHOACUSTIC_THRESHOLD_MS}")
+        logger.param(f"beats_per_token = {self.beats_per_token}")
+        
+        logger.step("Computing raw cue points...")
+        raw_cues = self._compute_raw_cue_points()
+        logger.info(f"Retrieved {len(raw_cues)} raw cue points from Cue-DETR")
+
+        logger.step("Computing phase offset and snapping cue points...")
         # 2. Compute phase offset and snap cue points
         # when we compute the token boundaries we find the phase offset that maximizes the score. the cue points are snapped to downbeats in a way that the mean score is maximized.
         best_beat_phase_offset, mean_cue_score, snapped_cues, token_boundaries = self._compute_snapped_cue_points(dsp_manager, raw_cues)
+        logger.info(f"Optimal phase offset found: {best_beat_phase_offset} beats (Mean Cue Score: {mean_cue_score:.3f})")
+        logger.info(f"Snapped {len(snapped_cues)} cue points to the structural grid")
+        
         duration_ms = dsp_manager.beats[-1][0] if dsp_manager.beats else 0
 
+        logger.step("Extracting lyrics and building token map...")
         # 3. Build Tokens
         lyrics = dsp_manager.get_lyrics()
+        logger.info("Computing dense DSP features for each token... (this might take a while)")
         tokens = self._build_token_map(dsp_manager, token_boundaries, snapped_cues, lyrics)
+        logger.success(f"Built {len(tokens)} 16-beat structural tokens")
 
+        logger.step("Computing global track properties...")
         # 4. Global properties
         key = dsp_manager.compute_camelot_key(0, duration_ms)
+        logger.info(f"Global Camelot Key detected: {key}")
         
-        # global vocal features
+        logger.step("Computing global vocal features and dynamics...")
         edge_keys = (
             "vocal_energy_dominance",
             "vocal_intensity",
@@ -66,8 +83,14 @@ class TrackAnalyzer:
         global_vocal_features["vocal_confidence_steepness"] = round(float(dsp_manager.vocal_confidence_steepness), 4)
         global_vocal_features["vocal_edge_window_bars"] = VOCAL_START_END_BAR_WINDOW
 
+        # Log dynamic parameters
+        logger.param(f"vocal_density_threshold = {dsp_manager.vocal_threshold}")
+        logger.param(f"vocal_confidence_steepness = {dsp_manager.vocal_confidence_steepness}")
+        logger.param(f"VOCAL_START_END_BAR_WINDOW = {VOCAL_START_END_BAR_WINDOW}")
+
         tokens_bpm = [t.dsp_features.get("BPM") for t in tokens if t.is_mixable and t.dsp_features.get("BPM") is not None]
         bpm = dsp_manager.compute_global_bpm(cached_token_bpms=tokens_bpm)
+        logger.info(f"Global BPM calculated: {bpm}")
 
         # TODO refactor classes as dataclasses / pydantic 
         # (This TODO was addressed by the DTO migration but left here for history)
@@ -110,17 +133,17 @@ class TrackAnalyzer:
         saved_sensitivity = None
 
         if cue_points_path.exists():
-            print(f"Cue points already exist for {self.name}, loading from {cue_points_path}")
+            logger.cache(f"Cue points already exist for {self.name}, loading from cache...")
             saved_sensitivity, cue_points = _load_cue_payload(cue_points_path)
-            print("Cue points loaded successfully.")
+            logger.success("Cue points loaded successfully.")
 
         if saved_sensitivity != CUE_DETR_SENSITIVITY:
             if saved_sensitivity is not None:
-                print(
+                logger.warning(
                     f"Cue points for {self.name} were computed with a different sensitivity "
                     f"({saved_sensitivity}) than the current one ({CUE_DETR_SENSITIVITY})."
                 )
-                print("Recomputing cue points with the current sensitivity...")
+                logger.info("Recomputing cue points with the current sensitivity...")
             
             cue_points_path.parent.mkdir(parents=True, exist_ok=True)
             from semantic_msa.adapters.cue_detr.extractor import _compute_cue_points
@@ -140,7 +163,7 @@ class TrackAnalyzer:
                 json.dump(payload, f, indent=4)
                 
             _, cue_points = _load_cue_payload(cue_points_path)
-            print("Cue points computed and saved successfully.")
+            logger.success("Cue points computed and saved successfully.")
 
         # note: the cue points in the json file are in seconds, we need to convert them to milliseconds for the RawCuePoint class
         return [RawCuePoint(time_ms=int(cue["time"] * 1000), confidence_score=cue["score"]) for cue in cue_points]
@@ -149,7 +172,7 @@ class TrackAnalyzer:
         best_beat_phase_offset = None
         best_mean_score = None
         best_snapped_cues = []
-        best_token_boundaries = []
+        logger.info(f"Testing {dsp_manager.beats_per_token // 4} different phase offsets to maximize cue alignment...")
 
         for i in range(dsp_manager.beats_per_token // 4):
             # token boundaries now include tail and intro pad, this was necessary for completeness. now we can move this to the track class, this is necessary because (see blablabla) we have the micro intro pad that has 8000 bpm and so the qer is very high. even though it's few ms 
@@ -178,6 +201,7 @@ class TrackAnalyzer:
             # for snapped_cue in snapped_cues:
             #     print(snapped_cue.json())
 
+        logger.info(f"Selected offset {best_beat_phase_offset} with highest mean score ({best_mean_score:.3f})")
         return best_beat_phase_offset, best_mean_score, best_snapped_cues, best_token_boundaries
 
     def _snap_cue_point(self, raw_cue: RawCuePoint, dsp_manager: DSPManager, token_boundaries: list[int], downbeat_offset_to_skip: int) -> SnappedCuePoint:
