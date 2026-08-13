@@ -26,6 +26,7 @@ dependencies = [
     # You MUST install it manually using: 
     # uv pip install git+https://github.com/m-bain/whisperx.git@2cfd7b7c5c7bba144954364db747319b50e8232b
     # and run the project using `uv run --no-sync` to avoid wiping it.
+    "rich>=15.0.0",
 ]
 
 [tool.uv]
