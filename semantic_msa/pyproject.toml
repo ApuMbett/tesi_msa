@@ -3,7 +3,7 @@ name = "semantic-msa"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11, <3.13"
 dependencies = [
     "pydantic>=2.0",
     "librosa>=0.10.0",
@@ -19,23 +19,19 @@ dependencies = [
     "pandas>=2.2.2",
     "pillow>=10.4.0",
     "datasets>=2.20.0",
-    "whisperx @ git+https://github.com/m-bain/whisperx.git@2cfd7b7c5c7bba144954364db747319b50e8232b",
+    # NOTE: whisperx is explicitly excluded from these dependencies because its 
+    # upstream requirements.txt secretly injects conflicting PyTorch index URLs 
+    # (--extra-index-url cu128). This causes strict package managers like 'uv' 
+    # to panic and crash during dependency resolution. 
+    # You MUST install it manually using: 
+    # uv pip install git+https://github.com/m-bain/whisperx.git@2cfd7b7c5c7bba144954364db747319b50e8232b
+    # and run the project using `uv run --no-sync` to avoid wiping it.
 ]
 
 [tool.uv]
 environments = [
     "sys_platform == 'linux'",
 ]
-
-[tool.uv.sources]
-torch = { index = "pytorch" }
-torchvision = { index = "pytorch" }
-torchaudio = { index = "pytorch" }
-
-[[tool.uv.index]]
-name = "pytorch"
-url = "https://download.pytorch.org/whl/cu128"
-explicit = true
 
 [build-system]
 requires = ["hatchling"]
