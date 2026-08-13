@@ -20,7 +20,7 @@ class TrackAnalyzer:
         self.workspace = workspace
         self.path = str(workspace.source_audio_path)
         self.name = workspace.track_name
-        self.author = author
+        self.author = author # TODO add to workspace
         self.beats_per_token = beats_per_token
         # this weight determines how much the quantization error ratio will affect the final score, allowing for tuning based on how strict we want to be about structural alignment versus raw confidence. between 0 and 1, where 0 means no penalty and 1 means full penalty based on the quantization error ratio. when 1 the structural alignment has maximum importance, when 0 the raw confidence score has maximum importance.
         self.structural_penalty_weight = structural_penalty_weight
@@ -337,7 +337,8 @@ if __name__ == "__main__":
     filename = sys.argv[1] if len(sys.argv) > 1 else "blablabla.mp3"
     
     # We still need repo_root to locate the original mp3 if it's in data/raw_audio
-    repo_root = Path(__file__).resolve().parent.parent.parent
+    # __file__ is in tesi/semantic_msa/src/semantic_msa/utils/
+    repo_root = Path(__file__).resolve().parent.parent.parent.parent.parent
     original_audio = repo_root / "data" / "raw_audio" / filename
     
     workspace = TrackWorkspace(track_name=Path(filename).stem, original_audio_path=original_audio)

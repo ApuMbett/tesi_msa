@@ -9,9 +9,10 @@ from pathlib import Path
 from scipy.stats import pearsonr
 from semantic_msa.domain.workspace import TrackWorkspace
 
-BASE_DIR = Path(__file__).resolve().parent  # semantic_msa/utils
+BASE_DIR = Path(__file__).resolve().parent
 SEMANTIC_MSA_DIR = BASE_DIR.parent
-REPO_ROOT = SEMANTIC_MSA_DIR.parent
+# Because we are in src/semantic_msa/utils, we need 3 more parents to reach tesi/
+REPO_ROOT = SEMANTIC_MSA_DIR.parent.parent.parent
 DATA_DIR = REPO_ROOT / "data"
 AUDIO_DIR = DATA_DIR / "raw_audio"
 BEATNET_ENGINE_DIR = REPO_ROOT / "beatnet_engine"

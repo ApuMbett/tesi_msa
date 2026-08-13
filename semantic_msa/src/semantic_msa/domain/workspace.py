@@ -11,6 +11,7 @@ class TrackWorkspace:
     Eliminates scattered outputs by grouping stems, tokens, caches, and final JSONs
     under a unified dataset root.
     """
+    #TODO Ideally here we want to save also the data that composes track_identity so basically author and song name. 
     track_name: str
     original_audio_path: Optional[Path] = None
 
@@ -21,8 +22,8 @@ class TrackWorkspace:
         if dataset_root_env:
             self.root = Path(dataset_root_env).resolve()
         else:
-            # Fallback relative to the repository root
-            repo_root = Path(__file__).resolve().parent.parent.parent
+            # Fallback relative to the repository root (tesi)
+            repo_root = Path(__file__).resolve().parent.parent.parent.parent.parent
             self.root = repo_root / "data" / "processed"
 
         self.track_dir = self.root / self.track_name
