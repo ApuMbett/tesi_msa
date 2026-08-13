@@ -19,7 +19,11 @@ class TrackAnalyzer:
     """
     def __init__(self, workspace: TrackWorkspace, author: str, beats_per_token: int = 16, structural_penalty_weight: float = STRUCTURAL_PENALTY_WEIGHT):
         self.workspace = workspace
-        self.path = str(workspace.source_audio_path)
+        
+        # Ensure workspace layout is created and audio is copied
+        self.audio_path = self.workspace.setup()
+        self.path = str(self.audio_path)
+        
         self.name = workspace.track_name
         self.author = author # TODO add to workspace
         self.beats_per_token = beats_per_token
