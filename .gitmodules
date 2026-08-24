@@ -1,0 +1,3 @@
+[submodule "semantic_msa/externals/cue_detr_source"]
+	path = semantic_msa/src/semantic_msa/externals/cue_detr_source
+	url = https://github.com/ETH-DISCO/cue-detr.git

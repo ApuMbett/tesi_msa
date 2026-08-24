@@ -7,6 +7,7 @@ import numpy as np
 import librosa
 from typing import Tuple
 from whisperx.vads.vad import Vad
+from semantic_msa.utils.logger import logger
 
 # ==========================================
 # We will define the custom SyedRMSVad class here later!
@@ -221,25 +222,26 @@ class SyedRMSVad(Vad):
 # ==========================================
 # 3. MAIN EXECUTION
 # ==========================================
-if __name__ == "__main__":
-    # 1. Catch the audio file path passed by the DSPManager
-    if len(sys.argv) < 2:
-        print("Error: No audio file provided.")
-        print("Usage: python run_custom_whisper.py <path_to_vocals.wav>")
-        sys.exit(1)
-        
-    vocals_path = sys.argv[1]
-    
-    if not os.path.exists(vocals_path):
-        print(f"Error: Could not find audio file at {vocals_path}")
-        sys.exit(1)
+def check_health() -> None:
+    """Verifies that the WhisperX environment and model dependencies are correctly installed."""
+    try:
+        import whisperx
+        import torch
+    except ImportError as e:
+        raise RuntimeError(
+            f"WhisperX dependency missing: {e}. "
+            "Please ensure you have installed whisperx manually with:\n"
+            "uv pip install git+https://github.com/m-bain/whisperx.git@2cfd7b7c5c7bba144954364db747319b50e8232b\n"
+            "and that you are running the project using `uv run --no-sync`."
+        ) from e
 
+def transcribe_vocals(vocals_path: str) -> dict:
     # 2. Set up Device & Compute Type
     device = "cuda" if torch.cuda.is_available() else "cpu"
     compute_type = "float16" if device == "cuda" else "int8"
 
     # 3. Load WhisperX Model
-    print(f"Loading WhisperX (large-v2) on {device}...")
+    logger.step(f"Loading WhisperX (large-v2) on {device}...")
     my_vad = SyedRMSVad()
     whisper_model = whisperx.load_model(
         "large-v2", 
@@ -247,18 +249,18 @@ if __name__ == "__main__":
         compute_type=compute_type,
         vad_model=my_vad
     )
-    print("Model loaded successfully.")
+    logger.success("Model loaded successfully.")
 
     # 4. Load Audio
-    print(f"Loading audio: {vocals_path}")
+    logger.step(f"Loading audio: {vocals_path}")
     audio = whisperx.load_audio(vocals_path)
     
     # 5. Base Transcription
-    print("Running transcription...")
-    result = whisper_model.transcribe(audio, batch_size=16)
+    logger.step("Running transcription...")
+    result = whisper_model.transcribe(audio, batch_size=4)
     
     # 6. Forced Alignment (Word-level timestamps)
-    print("Running forced alignment for DJ grid precision...")
+    logger.step("Running forced transcription alignment...")
     align_model, metadata = whisperx.load_align_model(
         language_code=result["language"], 
         device=device
@@ -273,15 +275,4 @@ if __name__ == "__main__":
         return_char_alignments=False
     )
     
-    # 7. Write the output to a JSON file for the main thesis environment to read
-    track_name = vocals_path.split("/")[-2]  
-    # create the output directory if it doesn't exist
-    os.makedirs(f"../data/json_db/{track_name}", exist_ok=True)
-    output_filename = f"../data/json_db/{track_name}/_whisper_output.json"
-    print(f"Saving exact timestamps to {output_filename}...")
-    print(json.dumps(aligned_result, indent=2))  # Debug: print the aligned result to console
-    
-    with open(output_filename, "w", encoding="utf-8") as f:
-        json.dump(aligned_result, f, ensure_ascii=False, indent=2)
-        
-    print("WhisperX Bridge Script completed successfully!")
+    return aligned_result
