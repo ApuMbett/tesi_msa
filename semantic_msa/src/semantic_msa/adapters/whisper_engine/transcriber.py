@@ -257,10 +257,10 @@ def transcribe_vocals(vocals_path: str) -> dict:
     
     # 5. Base Transcription
     logger.step("Running transcription...")
-    result = whisper_model.transcribe(audio, batch_size=16)
+    result = whisper_model.transcribe(audio, batch_size=4)
     
     # 6. Forced Alignment (Word-level timestamps)
-    logger.step("Running forced alignment for DJ grid precision...")
+    logger.step("Running forced transcription alignment...")
     align_model, metadata = whisperx.load_align_model(
         language_code=result["language"], 
         device=device
