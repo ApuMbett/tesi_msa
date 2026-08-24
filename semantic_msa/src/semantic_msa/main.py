@@ -26,7 +26,19 @@ def main():
     try:
         extractor = TrackAnalyzer(track_ws, args.author)
         track = extractor.extract()
+        
+        full_json_path = track_ws.output_dir / "full.json"
+        with open(full_json_path, "w") as f:
+            f.write(track.model_dump_json(indent=4, by_alias=True))
+        logger.info(f"Full track JSON saved to {full_json_path}")
+            
+        LLM_json_path = track_ws.output_dir / "LLM.json"
+        with open(LLM_json_path, "w") as f:
+            json.dump(track.LLM_representation(), f, indent=4)
+        logger.info(f"LLM representation JSON saved to {LLM_json_path}")
+
         logger.success("Analysis complete.")
+        
     except Exception as e:
         logger.error(f"Pipeline crashed during execution: {str(e)}", exc_info=True)
         sys.exit(1)
