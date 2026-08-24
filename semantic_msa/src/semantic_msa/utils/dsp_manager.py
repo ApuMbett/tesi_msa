@@ -400,8 +400,8 @@ class DSPManager:
       vocal_path = self.workspace.stems_dir / "vocals.wav"
       instrumental_path = self.workspace.stems_dir / "no_vocals.wav"
     else:
-      vocal_path = AUDIO_DIR / "htdemucs" / self.track_name / "vocals.wav"
-      instrumental_path = AUDIO_DIR / "htdemucs" / self.track_name / "no_vocals.wav"
+      vocal_path = AUDIO_DIR / "vocals.wav"
+      instrumental_path = AUDIO_DIR / "no_vocals.wav"
 
     y_vocal, _ = librosa.load(vocal_path, sr=self.sr)
     y_instrumental, _ = librosa.load(instrumental_path, sr=self.sr)
@@ -415,25 +415,28 @@ class DSPManager:
       # run demucs and save the vocal and instrumental tracks in memory for later use.
       logger.info(f"[Demucs] Extracting vocals for {self.audio_path}...")
 
-      out_dir = self.workspace.stems_dir.parent if self.workspace else AUDIO_DIR
-      command = ["demucs", "--two-stems=vocals", "-n", "htdemucs", "-o", str(out_dir), self.audio_path]
-      subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
-
       if self.workspace:
-          # Demucs creates out_dir / "htdemucs" / track_name / "vocals.wav"
-          demucs_out = out_dir / "htdemucs" / self.track_name
-          if demucs_out.exists():
-              for f in demucs_out.glob("*.wav"):
-                  f.rename(self.workspace.stems_dir / f.name)
-              import shutil
-              shutil.rmtree(out_dir / "htdemucs")
+          out_dir = self.workspace.stems_dir
+      else:
+          out_dir = AUDIO_DIR
+          
+      command = ["demucs", "--two-stems=vocals", "-n", "htdemucs", "-o", str(out_dir), "--filename", "{stem}.{ext}", self.audio_path]
+      subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
+      
+      # Demucs always creates a subfolder for the model name, even when using custom filenames
+      demucs_model_dir = out_dir / "htdemucs"
+      if demucs_model_dir.exists():
+          for f in demucs_model_dir.glob("*.wav"):
+              f.rename(out_dir / f.name)
+          import shutil
+          shutil.rmtree(demucs_model_dir)
   
   def has_splitted_tracks(self):
     # this method checks if the song has already been splitted into vocal and instrumental tracks, to avoid doing it multiple times. 
     if self.workspace:
         expected_vocal_path = self.workspace.stems_dir / "vocals.wav"
     else:
-        expected_vocal_path = AUDIO_DIR / "htdemucs" / self.track_name / "vocals.wav"
+        expected_vocal_path = AUDIO_DIR / "vocals.wav"
     return expected_vocal_path.exists()
 
   #TODO don't know if this is the right place for these methods but for now it's easier to implement them here since they are related to the DSP features of the track, we can refactor later if needed.
@@ -450,7 +453,7 @@ class DSPManager:
         vocal_path = self.workspace.stems_dir / "vocals.wav"
     else:
         output_json_path = DATA_DIR / "json_db" / self.track_name / "_whisper_output.json"
-        vocal_path = AUDIO_DIR / "htdemucs" / self.track_name / "vocals.wav"
+        vocal_path = AUDIO_DIR / "vocals.wav"
 
     if not output_json_path.exists():
       from semantic_msa.adapters.whisper_engine.transcriber import transcribe_vocals
