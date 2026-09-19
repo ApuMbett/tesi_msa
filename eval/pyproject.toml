@@ -1,0 +1,14 @@
+[project]
+name = "eval"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "datasets>=5.0.1",
+    "dotenv>=0.9.9",
+    "semantic-msa",
+]
+
+[tool.uv.sources]
+semantic-msa = { workspace = true }
