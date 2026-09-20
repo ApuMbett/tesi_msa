@@ -8,6 +8,7 @@ import librosa
 from typing import Tuple
 from whisperx.vads.vad import Vad
 from semantic_msa.utils.logger import logger
+import threading
 
 # ==========================================
 # We will define the custom SyedRMSVad class here later!
@@ -235,21 +236,47 @@ def check_health() -> None:
             "and that you are running the project using `uv run --no-sync`."
         ) from e
 
+_whisper_model = None
+_align_models = {}
+_model_lock = threading.Lock()
+
+def get_whisper_model(device, compute_type):
+    global _whisper_model
+    with _model_lock:
+        if _whisper_model is None:
+            logger.step(f"Loading WhisperX (large-v2) on {device}...")
+            my_vad = SyedRMSVad()
+            _whisper_model = whisperx.load_model(
+                "large-v2", 
+                device, 
+                compute_type=compute_type,
+                vad_model=my_vad
+            )
+            logger.success("WhisperX model loaded successfully.")
+        else:
+            logger.cache("WhisperX model already loaded in memory, using cache.")
+        return _whisper_model
+
+def get_align_model(language_code, device):
+    with _model_lock:
+        if language_code not in _align_models:
+            logger.step(f"Loading WhisperX alignment model for {language_code}...")
+            _align_models[language_code] = whisperx.load_align_model(
+                language_code=language_code, 
+                device=device
+            )
+            logger.success("Alignment model loaded successfully.")
+        else:
+            logger.cache(f"Alignment model for {language_code} already loaded in memory, using cache.")
+        return _align_models[language_code]
+
 def transcribe_vocals(vocals_path: str) -> dict:
     # 2. Set up Device & Compute Type
     device = "cuda" if torch.cuda.is_available() else "cpu"
     compute_type = "float16" if device == "cuda" else "int8"
 
-    # 3. Load WhisperX Model
-    logger.step(f"Loading WhisperX (large-v2) on {device}...")
-    my_vad = SyedRMSVad()
-    whisper_model = whisperx.load_model(
-        "large-v2", 
-        device, 
-        compute_type=compute_type,
-        vad_model=my_vad
-    )
-    logger.success("Model loaded successfully.")
+    # 3. Load WhisperX Model (from cache if already loaded)
+    whisper_model = get_whisper_model(device, compute_type)
 
     # 4. Load Audio
     logger.step(f"Loading audio: {vocals_path}")
@@ -261,10 +288,7 @@ def transcribe_vocals(vocals_path: str) -> dict:
     
     # 6. Forced Alignment (Word-level timestamps)
     logger.step("Running forced transcription alignment...")
-    align_model, metadata = whisperx.load_align_model(
-        language_code=result["language"], 
-        device=device
-    )
+    align_model, metadata = get_align_model(result["language"], device)
     
     aligned_result = whisperx.align(
         result["segments"], 

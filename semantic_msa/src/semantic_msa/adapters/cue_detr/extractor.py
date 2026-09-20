@@ -9,6 +9,8 @@ import argparse
 import librosa
 import json
 from pathlib import Path
+import threading
+from semantic_msa.utils.logger import logger
 
 # CONSTANTS
 OVERLAP = 0.75
@@ -27,14 +29,28 @@ def check_health() -> None:
     except ImportError as e:
         raise RuntimeError(f"Cue-DETR dependency missing: {e}") from e
 
+_cue_detr_cache = {}
+_cue_detr_lock = threading.Lock()
+
+def get_cue_detr_model(checkpoint):
+    with _cue_detr_lock:
+        if checkpoint not in _cue_detr_cache:
+            logger.step(f"Loading Cue-DETR ({checkpoint}) on {device if 'device' in locals() else 'cuda' if torch.cuda.is_available() else 'cpu'}...")
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            image_processor = DetrImageProcessor.from_pretrained('facebook/detr-resnet-50')
+            model = DetrForObjectDetection.from_pretrained(checkpoint)
+            model.to(device)
+            _cue_detr_cache[checkpoint] = (image_processor, model, device)
+            logger.success("Cue-DETR model loaded successfully.")
+        else:
+            logger.cache("Cue-DETR model already loaded in memory, using cache.")
+        return _cue_detr_cache[checkpoint]
+
 def _compute_cue_points(track_path: Path, checkpoint: str, radius: int, sensitivity: float) -> list[dict[str, float]]:
     scale = lambda x: (x - np.min(x)) / (np.max(x) - np.min(x))
 
-    # Load Model
-    image_processor = DetrImageProcessor.from_pretrained('facebook/detr-resnet-50')
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    model = DetrForObjectDetection.from_pretrained(checkpoint)
-    model.to(device)
+    # Load Model (from cache if already loaded)
+    image_processor, model, device = get_cue_detr_model(checkpoint)
 
     # process track
     y, sr = librosa.load(track_path)  # standard sr of 22050

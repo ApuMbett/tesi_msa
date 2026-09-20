@@ -8,6 +8,7 @@ dependencies = [
     "datasets>=5.0.1",
     "dotenv>=0.9.9",
     "semantic-msa",
+    "wakepy>=1.0.0",
 ]
 
 [tool.uv.sources]
