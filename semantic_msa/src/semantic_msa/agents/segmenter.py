@@ -37,14 +37,10 @@ class SemanticSegmenterAgent(BaseAgent):
             f"{telemetry} \n"
         )
 
-        raw_response = self.provider.generate(
+        raw_response, parsed_dto = self.generate_and_parse(
             system_prompt=self.get_system_prompt(),
             user_message=user_message,
-            temperature=self.temperature,
-            grounding=self.grounding,
-            response_schema=SegmenterResponseDTO,
-            thinking_budget=self.thinking_budget,
+            schema_class=SegmenterResponseDTO,
         )
 
-        parsed_dto = self.parse_response(raw_response, SegmenterResponseDTO)
         return user_message, parsed_dto, parsed_dto.model_dump()

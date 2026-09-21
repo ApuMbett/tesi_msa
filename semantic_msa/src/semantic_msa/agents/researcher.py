@@ -29,14 +29,10 @@ class CulturalResearcherAgent(BaseAgent):
             f"TARGET TRACK TELEMETRY:\n{telemetry}\n PROFILER OUTPUT:\n{formatted_profiler_data}\n"
         )
 
-        raw_response = self.provider.generate(
+        raw_response, parsed_dto = self.generate_and_parse(
             system_prompt=self.get_system_prompt(),
             user_message=user_message,
-            temperature=self.temperature,
-            grounding=self.grounding,
-            response_schema=ResearcherResponseDTO,
-            thinking_budget=self.thinking_budget,
+            schema_class=ResearcherResponseDTO,
         )
 
-        parsed_dto = self.parse_response(raw_response, ResearcherResponseDTO)
         return user_message, parsed_dto, parsed_dto.model_dump()

@@ -17,14 +17,10 @@ class AcousticProfilerAgent(BaseAgent):
     def run(self, track_data: Dict[str, Any]) -> Tuple[str, ProfilerResponseDTO, Dict[str, Any]]:
         user_message = TelemetryEncoder.encode_for_profiler(track_data)
 
-        raw_response = self.provider.generate(
+        raw_response, parsed_dto = self.generate_and_parse(
             system_prompt=self.get_system_prompt(),
             user_message=user_message,
-            temperature=self.temperature,
-            grounding=self.grounding,
-            response_schema=ProfilerResponseDTO,
-            thinking_budget=self.thinking_budget,
+            schema_class=ProfilerResponseDTO,
         )
 
-        parsed_dto = self.parse_response(raw_response, ProfilerResponseDTO)
         return user_message, parsed_dto, parsed_dto.model_dump()

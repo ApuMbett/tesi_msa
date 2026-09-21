@@ -55,6 +55,7 @@ class LLMProvider(ABC):
         grounding: bool = False,
         response_schema: Optional[Type] = None,
         thinking_budget: Optional[int] = None,
+        thinking_level: Optional[str] = None,
     ) -> str:
         """Executes generation and returns raw text response."""
         pass
@@ -85,6 +86,7 @@ class GeminiNativeGroundedProvider(LLMProvider):
         grounding: bool = False,
         response_schema: Optional[Type] = None,
         thinking_budget: Optional[int] = None,
+        thinking_level: Optional[str] = None,
     ) -> str:
         config_kwargs: Dict[str, Any] = {
             "system_instruction": system_prompt,
@@ -98,8 +100,14 @@ class GeminiNativeGroundedProvider(LLMProvider):
             config_kwargs["response_mime_type"] = "application/json"
             config_kwargs["response_schema"] = response_schema
 
+        thinking_kwargs: Dict[str, Any] = {}
         if thinking_budget is not None and thinking_budget >= 0:
-            config_kwargs["thinking_config"] = {"thinking_budget": thinking_budget}
+            thinking_kwargs["thinking_budget"] = thinking_budget
+        if thinking_level:
+            thinking_kwargs["thinking_level"] = thinking_level.lower()
+
+        if thinking_kwargs:
+            config_kwargs["thinking_config"] = genai_types.ThinkingConfig(**thinking_kwargs)
 
         config = genai_types.GenerateContentConfig(**config_kwargs)
         response = self.client.models.generate_content(
@@ -140,7 +148,9 @@ class OpenAICompatibleProvider(LLMProvider):
         grounding: bool = False,
         response_schema: Optional[Type] = None,
         thinking_budget: Optional[int] = None,
+        thinking_level: Optional[str] = None,
     ) -> str:
+        # TODO: Support reasoning_effort for reasoning models (e.g. o1, o3-mini) when thinking_level is set
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
@@ -176,9 +186,11 @@ class StubProvider(LLMProvider):
         grounding: bool = False,
         response_schema: Optional[Type] = None,
         thinking_budget: Optional[int] = None,
+        thinking_level: Optional[str] = None,
     ) -> str:
+        schema_name = getattr(response_schema, "__name__", "").lower() if response_schema else ""
         prompt_lower = system_prompt.lower()
-        if "blind profiler" in prompt_lower or "macro_profile" in prompt_lower:
+        if "profiler" in schema_name or "profiler" in prompt_lower or "macro_profile" in prompt_lower:
             return json.dumps({
                 "macro_profile": {
                     "inferred_genres": ["Electronic", "House"],
@@ -195,7 +207,7 @@ class StubProvider(LLMProvider):
                     "rationale": "Token indices 1 through 10 demonstrate climbing ROE.",
                 },
             })
-        elif "cultural historian" in prompt_lower or "cultural_prior" in prompt_lower:
+        elif "researcher" in schema_name or "researcher" in prompt_lower or "musicological" in prompt_lower or "cultural" in prompt_lower:
             return json.dumps({
                 "cultural_prior": {
                     "source_identity": {
@@ -215,7 +227,7 @@ class StubProvider(LLMProvider):
                     "researcher_notes": "Iconic electro house standard verified from lyrics and telemetry.",
                 },
             })
-        elif "acoustic captioner" in prompt_lower or "token_captions" in prompt_lower:
+        elif "captioner" in schema_name or "caption" in prompt_lower:
             # Extract number of tokens from user message if possible
             count = len(re.findall(r'"index":\s*(\d+)', user_message))
             if count == 0:
