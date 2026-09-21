@@ -246,6 +246,7 @@ class StubProvider(LLMProvider):
                 "segments": [
                     {
                         "segment_index": 0,
+                        "standard_label": "intro",
                         "segment_name": "Intro",
                         "token_range": [0, 2],
                         "macro_caption": "Minimal introductory beat establishing foundational tempo.",
@@ -253,6 +254,7 @@ class StubProvider(LLMProvider):
                     },
                     {
                         "segment_index": 1,
+                        "standard_label": "chorus",
                         "segment_name": "Main Drop",
                         "token_range": [3, 8],
                         "macro_caption": "Full energetic body of the track with driving bass.",
@@ -260,6 +262,7 @@ class StubProvider(LLMProvider):
                     },
                     {
                         "segment_index": 2,
+                        "standard_label": "outro",
                         "segment_name": "Outro",
                         "token_range": [9, 10],
                         "macro_caption": "Gradual reduction in arrangement density leading to fade.",

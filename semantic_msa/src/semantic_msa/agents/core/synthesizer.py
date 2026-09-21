@@ -97,6 +97,7 @@ class FinalSegmentDTO:
     def __init__(self, segment_data: Dict[str, Any], tokens: List[FinalTokenDTO]):
         self.index = segment_data.get("segment_index", 0)
         self.name = segment_data.get("segment_name", "")
+        self.standard_label = segment_data.get("standard_label", "")
         self.macro_caption = segment_data.get("macro_caption", "")
         self.rationale = segment_data.get("rationale", "")
         token_range = segment_data.get("token_range", [0, 0])
@@ -113,6 +114,7 @@ class FinalSegmentDTO:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "index": self.index,
+            "standard_label": self.standard_label,
             "name": self.name,
             "start_time": self.start_time,
             "end_time": self.end_time,

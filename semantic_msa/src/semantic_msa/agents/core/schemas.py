@@ -73,6 +73,7 @@ class CaptionerResponseDTO(BaseModel):
 
 class SegmentDTO(BaseModel):
     segment_index: int
+    standard_label: str
     segment_name: str
     token_range: List[int]
     macro_caption: str = ""
@@ -108,6 +109,7 @@ class FinalTokenDTO(BaseModel):
 
 class FinalSegmentDTO(BaseModel):
     index: int
+    standard_label: str = ""
     name: str
     start_time: Any = 0.0
     end_time: Any = 0.0

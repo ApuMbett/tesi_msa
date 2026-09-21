@@ -26,7 +26,24 @@ You must interpret the raw telemetry using these strict physical definitions:
    * If **MEDIUM**: Produce standard structural sections aligned with popular and electronic music arrangements (typically around 9 to 12 coherent functional sections, e.g., separating verses, builds, drops, breakdowns, and distinct melodic transitions). Do not over-condense musically distinct sections.
    * If **HIGH**: Slice the track aggressively based on micro-shifts (typically 14+ segments, separating drum entry/exit phases or single-token transition cues).
 
-2. **Genre-Aware Taxonomy:** Name your segments according to the specific cultural and stylistic context provided in the `RESEARCHER OUTPUT` and `PROFILER OUTPUT`. Do not use generic pop terms for electronic music (e.g., label a section a "Breakdown" or "Drop" in EDM, but use "Refrain", "Bridge", or "Chorus" if analyzing a traditional Pop/Rock track).
+2. **Dual-Layer Taxonomy (Functional Anchor & Genre-Aware Descriptor):**
+   For every segment, you establish the coarse functional role first, then enrich it with cultural and stylistic nuance:
+
+   * **Step A: Functional Anchor (`standard_label`)**
+     Select strictly from the 7 official MIR classes:
+     ["intro", "verse", "chorus", "bridge", "inst", "outro", "silence"]
+
+     Mapping Rules:
+     - "intro": Opening section at the beginning.
+     - "verse": Narrative vocal section (also map any pre-chorus or vocal build-up here).
+     - "chorus": Climactic, energetic hook (map EDM drops or main vocal hooks here).
+     - "bridge": Contrasting section providing harmonic/melodic variation before returning to verse/chorus.
+     - "inst": Purely instrumental section with minimal or no vocals (map drum builds, breakdowns, or drop sections with no main vocals here).
+     - "outro": Closing section at the end.
+     - "silence": Initial or trailing silent segments.
+
+   * **Step B: Genre-Aware Descriptor (`segment_name`)**
+     Once the functional category is anchored, assign a genre-specific descriptive name using the cultural and stylistic context provided in the `RESEARCHER OUTPUT` and `PROFILER OUTPUT`. Do not use generic pop terms for electronic music (e.g., label a section a "Breakdown" or "Drop" in EDM, but use "Refrain", "Bridge", or "Chorus" if analyzing a traditional Pop/Rock track).
 
 3. **Mathematical Contiguity & Ranges:** Segments must be perfectly contiguous and cover the entire track without dropping a single token. You must output the segment boundaries as an inclusive two-integer array `[start_token, end_token]`. 
    * **Crucial Edge Rule:** Do not sever continuous vocal phrases. You must use the `vocal_features.start_edge` and `end_edge` math to ensure lyrical phrases remain fully intact within a single segment boundary wherever mathematically possible.
@@ -42,6 +59,7 @@ You must respond with ONLY a raw, valid JSON object matching the exact schema be
   "segments": [
     {
       "segment_index": "Integer (Sequential starting at 0)",
+      "standard_label": "String (Official functional category strictly chosen from: 'intro', 'verse', 'chorus', 'bridge', 'inst', 'outro', 'silence')",
       "segment_name": "String (Genre-accurate structural label)",
       "token_range": ["Integer (start index)", "Integer (end index)"],
       "macro_caption": "String (A rich, synthesized paragraph combining the micro-captions of these tokens into one cohesive narrative arc.)",
