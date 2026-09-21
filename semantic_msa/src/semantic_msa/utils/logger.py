@@ -46,10 +46,16 @@ class Logger:
 
     def add_file_handler(self, logs_dir: Path, run_id: str):
         """
-        Adds a file handler to log plain text to pipeline_{run_id}.log
+        Adds a file handler to log plain text to pipeline_{run_id}.log.
+        If a FileHandler is already attached to this file (e.g. running full pipeline in one go),
+        it prevents duplicate handlers from printing duplicate log entries.
         """
         logs_dir.mkdir(parents=True, exist_ok=True)
-        log_file = logs_dir / f"pipeline_{run_id}.log"
+        log_file = (logs_dir / f"pipeline_{run_id}.log").resolve()
+
+        for h in self.logger.handlers:
+            if isinstance(h, logging.FileHandler) and Path(h.baseFilename).resolve() == log_file:
+                return
         
         file_handler = logging.FileHandler(log_file, encoding="utf-8")
         file_handler.setLevel(logging.INFO)

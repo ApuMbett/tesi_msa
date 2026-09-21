@@ -1,0 +1,29 @@
+experiment_name: "default_pipeline"
+unit: "minutes"
+
+agents:
+  profiler:
+    model: "gemini-2.5-flash"
+    temperature: 0.2
+    grounding: false
+    explainable: false
+
+  researcher:
+    model: "gemini-2.5-flash"
+    temperature: 0.2
+    grounding: true
+    explainable: false
+
+  captioner:
+    model: "gemini-2.5-flash"
+    temperature: 0.6
+    grounding: false
+    caption_length: 12
+    explainable: false
+
+  segmenter:
+    model: "gemini-2.5-pro"
+    temperature: 0.7
+    grounding: false
+    granularity: "MEDIUM"
+    explainable: false
