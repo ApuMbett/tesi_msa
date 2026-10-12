@@ -6,8 +6,43 @@ dist/
 wheels/
 *.egg-info
 
-# Virtual environments
-.venv
+# Virtual environments & secrets
+.venv/
+.env
+*.env
+semantic_msa/.env
 
-# data
-data/
+# Audio & binary assets
+*.mp3
+*.wav
+*.npz
+*.npy
+*.Identifier
+*.log
+
+# Evaluation outputs and raw data (packaged in eval/eval_artifacts.tar.gz)
+eval/eval_processed/
+eval/infer_results/
+eval/eval_results/
+eval/inference_results/
+eval/songformer_evaluation_results/
+eval/futga_inference/futga_inference_results_parsed/
+eval/dataset_loaders/downloaded_data/
+eval/downloaded_data/
+eval/tmp/
+eval/rq2_intra_track/
+eval/rq2_many_to_many/
+semantic_msa/data/
+/data/
+
+# Local folders & third-party clones
+=
+.agents/
+test/
+mixing_engine/
+Relazione/
+eval/futga_inference/FUTGA/
+semantic_msa/src/semantic_msa/externals/lp-music-caps/
+tagging_engine/TinyMU/
+eval/test_uv.py
+skills-lock.json
