@@ -1,0 +1,30 @@
+# ==============================================================================
+# DIRECT AUDIO BASELINE CONFIGURATION (GEMINI 3.5 FLASH LITE)
+# ==============================================================================
+# End-to-end multimodal baseline test where the audio is fed directly to
+# gemini-3.5-flash-lite to perform functional Music Structure Analysis (SongFormer 7-class taxonomy).
+
+experiment_name: "evaluation_direct_audio_flash_lite"
+mode: "direct_audio"
+unit: "seconds"
+
+# ------------------------------------------------------------------------------
+# PIPELINE EXECUTION SETTINGS
+# ------------------------------------------------------------------------------
+pipeline_settings:
+  resume: true
+  save_intermediate_steps: true
+  max_retries: 2
+  rate_limit_rpm: 5
+
+# ------------------------------------------------------------------------------
+# DIRECT AUDIO MODEL CONFIGURATION
+# ------------------------------------------------------------------------------
+# In accordance with methodology decisions:
+# - Receives external metadata (title, artist, duration) but NO calculated DSP telemetry
+# - Temperature is aligned with the Segmenter agent (0.7)
+direct_audio:
+  model: "gemini-3.5-flash-lite"
+  temperature: 0.7             # Aligned with Segmenter temperature
+  thinking_level: "low"
+  max_retries: 2

@@ -1,0 +1,72 @@
+# ==============================================================================
+# SEMANTIC MSA MULTI-AGENT PIPELINE CONFIGURATION
+# ==============================================================================
+
+# Benchmark / Experiment identification tag
+experiment_name: "evaluation_free_v1" 
+
+# Time unit for all output timestamps and boundaries: "minutes" (MM:SS) or "seconds" (SS.SS)
+unit: "minutes"
+
+# ------------------------------------------------------------------------------
+# PIPELINE EXECUTION SETTINGS (Crucial for 50+ Track Benchmarks)
+# ------------------------------------------------------------------------------
+pipeline_settings:
+  # Checkpoint resumption: If true, checks data/processed/<track>/agents/<step>.json
+  # and skips LLM execution if a valid output already exists.
+  resume: true
+
+  # Intermediate artifact persistence: If true, saves profiler.json, researcher.json,
+  # captioner.json, and segmenter.json. If false, only final.json is saved.
+  save_intermediate_steps: true
+
+  # Resilience: Number of retries with exponential backoff on transient API errors
+  # (e.g., HTTP 429 rate limit, 503 unavailable) or malformed JSON responses.
+  max_retries: 4
+
+  # Rate limiting: Maximum requests per minute (RPM).
+  # Crucial for Gemini Free Tier (15 RPM -> 4.0s minimum dispatch interval).
+  rate_limit_rpm: 15
+
+# ------------------------------------------------------------------------------
+# DOMAIN AGENT CONFIGURATIONS
+# ------------------------------------------------------------------------------
+# Common parameters:
+#   model: Model ID (e.g., "gemini-3.8-flash", "gemini-3.1-pro-preview")
+#   temperature: Float [0.0 - 2.0]. Low (0.1 - 0.2) for math/search, higher (0.5 - 0.7) for prose
+#   grounding: Boolean. Enables native Google Search grounding tool (Researcher only)
+#   explainable: Boolean. Loads explainable prompt and generates rationale fields
+#   thinking_level: String. Supported levels: "low", "medium", "high"
+#
+# Agent-specific parameters:
+#   captioner:
+#     caption_length: Integer. Target max word count per token caption (20 matches prompt)
+#   segmenter:
+#     granularity: String. Segmentation resolution: "LOW", "MEDIUM", "HIGH"
+# ------------------------------------------------------------------------------
+agents:
+  profiler:
+    model: "huggingface/Qwen/Qwen2.5-72B-Instruct"
+    temperature: 0.1             # Strictly binds genre inference to DSP math
+    grounding: false
+    explainable: true
+
+  researcher:
+    model: "huggingface/Qwen/Qwen2.5-72B-Instruct"
+    temperature: 0.2
+    grounding: false # not in free plan 
+    explainable: true
+
+  captioner:
+    model: "huggingface/Qwen/Qwen2.5-72B-Instruct"
+    temperature: 0.5             # Balances rich vocabulary with strict <=20 word cap
+    grounding: false
+    caption_length: 20           # Aligned with CAPTION_LENGTH in code & system prompt
+    explainable: true
+
+  segmenter:
+    model: "huggingface/Qwen/Qwen2.5-72B-Instruct"
+    temperature: 0.7             # Allows expressive, fluid macro-captions
+    grounding: false
+    granularity: "MEDIUM"        # MEDIUM calculated from validation set 
+    explainable: true
