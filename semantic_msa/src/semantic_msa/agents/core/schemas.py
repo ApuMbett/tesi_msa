@@ -84,14 +84,28 @@ class SegmenterResponseDTO(BaseModel):
     segments: List[SegmentDTO] = Field(default_factory=list)
 
 
+# --- DIRECT AUDIO BASELINE SCHEMAS ---
+
+class DirectAudioSegmentDTO(BaseModel):
+    start: float = Field(description="Start time of the section in seconds.")
+    end: float = Field(description="End time of the section in seconds.")
+    label: str = Field(description="Functional label chosen ONLY from: intro, verse, chorus, bridge, inst, outro, silence.")
+    caption: str = Field(default="", description="1-2 sentences describing what is audible in that section.")
+
+
+class DirectAudioResponseDTO(BaseModel):
+    segments: List[DirectAudioSegmentDTO] = Field(default_factory=list)
+
+
 # --- FINAL JSON SYNTHESIS SCHEMAS ---
 
 class FinalTrackIdentityDTO(BaseModel):
     name: str = ""
+    author: str = ""
     artist: str = ""
     key: str = ""
     bpm: float = 0.0
-    duration: str = ""
+    duration: Any = ""
     cultural_context: Any = Field(default_factory=dict)
     acoustic_profile: Any = Field(default_factory=dict)
 

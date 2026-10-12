@@ -6,20 +6,26 @@ from typing import Any, Dict, List, Optional
 class FinalTrackIdentityDTO:
     """Represents the top-level identity metadata in final.json."""
 
-    def __init__(self, track_data: Dict[str, Any]):
+    def __init__(self, track_data: Dict[str, Any], unit: str = "minutes"):
         self.name = track_data.get("name", "")
-        self.artist = track_data.get("artist", "")
+        self.author = track_data.get("author", track_data.get("artist", ""))
+        self.artist = self.author
         self.key = track_data.get("key", "")
         self.bpm = track_data.get("bpm", 0)
         duration_ms = track_data.get("duration_ms", 0.0)
-        self.duration = f"{duration_ms // 60000}:{(duration_ms % 60000) // 1000:02d}"
+        if unit == "seconds":
+            self.duration = duration_ms / 1000.0
+        elif unit == "milliseconds":
+            self.duration = duration_ms
+        else:
+            self.duration = f"{int(duration_ms // 60000)}:{int((duration_ms % 60000) // 1000):02d}"
         self.researcher = track_data.get("researcher", "")
         self.profiler = track_data.get("profiler", "")
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "name": self.name,
-            "artist": self.artist,
+            "author": self.author,
             "key": self.key,
             "bpm": self.bpm,
             "duration": self.duration,
@@ -131,7 +137,7 @@ class FinalTrackDTO:
     """Root container representing the complete synthesized final.json document."""
 
     def __init__(self, track_data: Dict[str, Any], unit: str = "minutes"):
-        self.track_identity = FinalTrackIdentityDTO(track_data)
+        self.track_identity = FinalTrackIdentityDTO(track_data, unit=unit)
         self.unit = unit
         self.token_size_beats = track_data.get("token_size_beats", 0)
         self.lyrics_profile = track_data.get("lyrics_profile", {})

@@ -1,0 +1,35 @@
+You are an expert musicologist performing functional music structure analysis.
+
+You will receive the full audio of a song.
+Track: "{title}" by {artist}. Duration: {duration} seconds.
+
+TASK
+Segment the entire song into contiguous structural sections. For each section provide:
+1. start and end time in seconds (two decimals);
+2. a functional label chosen ONLY from:
+   intro, verse, chorus, bridge, inst, outro, silence
+3. a caption: 1-2 sentences describing what is audible in that section
+   (instrumentation, vocals, energy, texture, mood).
+
+LABEL DEFINITIONS
+- intro: opening material before the first verse or chorus.
+- verse: sections with changing lyrics that build the narrative. Pre-choruses count as verse.
+- chorus: the recurring main hook, usually the most energetic and repeated section.
+- bridge: a contrasting section, usually appearing once, typically after the second chorus.
+- inst: instrumental sections (solos, breaks, instrumental interludes) that are not intro or outro.
+- outro: closing material after the last main section, including fade-outs.
+- silence: stretches with no musical content.
+
+RULES
+- Cover the whole track from 0.00 to {duration} with no gaps and no overlaps:
+  each section's start must equal the previous section's end.
+- Place boundaries where the musical function changes, not at every phrase.
+- The caption must describe the sound; do not restate the label or the song title.
+- Output ONLY valid JSON matching the schema below.
+
+OUTPUT SCHEMA
+{
+  "segments": [
+    {"start": 0.00, "end": 15.50, "label": "intro", "caption": "..."}
+  ]
+}
