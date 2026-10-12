@@ -1,5 +1,10 @@
 from semantic_msa.agents.core.base import BaseAgent
-from semantic_msa.agents.core.factory import LLMFactory, LLMProvider
+from semantic_msa.agents.core.factory import (
+    GroqProvider,
+    LLMFactory,
+    LLMProvider,
+    OpenAICompatibleProvider,
+)
 from semantic_msa.agents.core.schemas import (
     CaptionerResponseDTO,
     FinalTrackDTO,
@@ -12,6 +17,8 @@ from semantic_msa.agents.core.telemetry import TelemetryEncoder
 
 __all__ = [
     "BaseAgent",
+    "GroqProvider",
+    "OpenAICompatibleProvider",
     "LLMFactory",
     "LLMProvider",
     "TelemetryEncoder",

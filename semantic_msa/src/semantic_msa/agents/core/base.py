@@ -3,7 +3,7 @@ import re
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Type
+from typing import Any, Dict, Optional, Tuple, Type, Union
 from pydantic import BaseModel
 
 from semantic_msa.agents.core.factory import LLMFactory, LLMProvider
@@ -71,6 +71,7 @@ class BaseAgent(ABC):
         system_prompt: str,
         user_message: str,
         schema_class: Optional[Type[BaseModel]] = None,
+        audio_path: Optional[Union[str, Path]] = None,
     ) -> Tuple[str, Any]:
         """
         Executes generation and schema parsing with exponential backoff retries on
@@ -88,17 +89,52 @@ class BaseAgent(ABC):
                     response_schema=schema_class,
                     thinking_budget=self.thinking_budget,
                     thinking_level=self.thinking_level,
+                    audio_path=audio_path,
                 )
                 parsed = self.parse_response(raw_response, schema_class)
                 return raw_response, parsed
             except Exception as e:
                 last_error = e
                 if attempt <= self.max_retries:
-                    wait_time = 1.5 ** attempt
-                    logger.warning(
-                        f"[bold yellow]Agent '{self.name}' attempt {attempt}/{self.max_retries + 1} failed:[/bold yellow] {e}. "
-                        f"Retrying in {wait_time:.1f}s..."
+                    err_str = str(e).lower()
+                    is_rate_limit = (
+                        "429" in err_str
+                        or "resource_exhausted" in err_str
+                        or "resourceexhausted" in err_str
+                        or "rate limit" in err_str
+                        or "quota" in err_str
                     )
+                    is_server_unavailable = (
+                        "503" in err_str
+                        or "unavailable" in err_str
+                        or "high demand" in err_str
+                    )
+                    if is_rate_limit:
+                        retry_match = (
+                            re.search(r"retry in ([0-9.]+)s", err_str, re.IGNORECASE)
+                            or re.search(r"retrydelay['\"]?:\s*['\"]?([0-9.]+)s?", err_str, re.IGNORECASE)
+                            or re.search(r"try again in ([0-9.]+)s", err_str, re.IGNORECASE)
+                        )
+                        if retry_match:
+                            wait_time = float(retry_match.group(1)) + 1.5
+                        else:
+                            wait_time = max(35.0, 20.0 * attempt)
+                        logger.warning(
+                            f"[bold yellow]Agent '{self.name}' attempt {attempt}/{self.max_retries + 1} hit Rate Limit / Quota Exhaustion (429).[/bold yellow] "
+                            f"Holding for {wait_time:.1f}s to allow quota window reset..."
+                        )
+                    elif is_server_unavailable:
+                        wait_time = max(5.0, 5.0 * attempt)
+                        logger.warning(
+                            f"[bold yellow]Agent '{self.name}' attempt {attempt}/{self.max_retries + 1} hit Server Overload / High Demand (503).[/bold yellow] "
+                            f"Backing off for {wait_time:.1f}s before retrying..."
+                        )
+                    else:
+                        wait_time = 1.5 ** attempt
+                        logger.warning(
+                            f"[bold yellow]Agent '{self.name}' attempt {attempt}/{self.max_retries + 1} failed:[/bold yellow] {e}. "
+                            f"Retrying in {wait_time:.1f}s..."
+                        )
                     time.sleep(wait_time)
                 else:
                     logger.error(
