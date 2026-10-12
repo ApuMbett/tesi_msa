@@ -123,17 +123,19 @@ def build_final_dataset(df, seed=SEED):
     in_pool = df[IN_DOMAIN_CONDITION(df)]
     if len(in_pool) < IN_DOMAIN_TARGET:
         raise ValueError(f"Requested {IN_DOMAIN_TARGET} In-Domain tracks, but only {len(in_pool)} available.")
-    in_sampled = in_pool.sample(n=IN_DOMAIN_TARGET, random_state=seed)
+    in_sampled = in_pool.sample(n=IN_DOMAIN_TARGET, random_state=seed).copy()
+    in_sampled["split"] = "in_domain"
 
     # 2. Middle-Ground Pool (prevent picking tracks already in in_domain sample)
     mg_pool = df[MIDDLE_GROUND_CONDITION(df) & ~df["id"].isin(in_sampled["id"])]
     if len(mg_pool) < MIDDLE_GROUND_TARGET:
         raise ValueError(f"Requested {MIDDLE_GROUND_TARGET} Middle-Ground tracks, but only {len(mg_pool)} available.")
-    mg_sampled = mg_pool.sample(n=MIDDLE_GROUND_TARGET, random_state=seed)
+    mg_sampled = mg_pool.sample(n=MIDDLE_GROUND_TARGET, random_state=seed).copy()
+    mg_sampled["split"] = "middle_ground"
 
     # 3. Out-of-Domain Pool
     # Step 3a: Extract all non-4/4 songs (guaranteed inclusion becaure there are only 5)
-    non_4_4_tracks = df[df["Time Signature"].notna() & (df["Time Signature"] != "4|4")]
+    non_4_4_tracks = df[df["Time Signature"].notna() & (df["Time Signature"] != "4|4")].copy()
     num_guaranteed = len(non_4_4_tracks)
 
     if num_guaranteed > OUT_OF_DOMAIN_TARGET:
@@ -159,7 +161,8 @@ def build_final_dataset(df, seed=SEED):
     ood_sampled_remainder = ood_4_4_pool.sample(n=remaining_needed, random_state=seed)
 
     # Combine guaranteed non-4/4 tracks with sampled 4/4 out-of-domain tracks
-    ood_sampled = pd.concat([non_4_4_tracks, ood_sampled_remainder])
+    ood_sampled = pd.concat([non_4_4_tracks, ood_sampled_remainder]).copy()
+    ood_sampled["split"] = "out_of_domain"
 
     # 4. Concatenate all partitions
     final_dataset = pd.concat([in_sampled, mg_sampled, ood_sampled]).reset_index(drop=True)
@@ -173,10 +176,16 @@ def map_final_dataset(df):
     df_songformbench = load_raw_songformbench()
     df_songformbench["match_id"] = df_songformbench["id"].str.replace("BHX_", "")
 
-    mapped_df = df[["id"]].merge(df_songformbench, left_on="id", right_on="match_id", how="left")
+    merge_cols = ["id"]
+    if "split" in df.columns:
+        merge_cols.append("split")
+
+    mapped_df = df[merge_cols].merge(df_songformbench, left_on="id", right_on="match_id", how="left")
     mapped_df = mapped_df.drop(columns=["id_x", "match_id"]).rename(columns={"id_y": "id"})
     
-    return mapped_df
+    # Keep id as the first column
+    cols = ["id"] + [col for col in mapped_df.columns if col != "id"]
+    return mapped_df[cols]
 
 
 def verify_dataset_integrity(df_original, final_df, mapped_df):
@@ -267,8 +276,26 @@ def verify_dataset_integrity(df_original, final_df, mapped_df):
         "Failed merge: missing 'labels' in mapped_df!"
     )
 
+    # 8. Check Split Labels
+    assert "split" in final_df.columns and not final_df["split"].isna().any(), (
+        "Missing or null 'split' column in final_df!"
+    )
+    assert "split" in mapped_df.columns and not mapped_df["split"].isna().any(), (
+        "Missing or null 'split' column in mapped_df!"
+    )
+
     print("All assertions passed successfully!")
 
+
+def get_MSA_labels(df):
+
+    for _, row in df.iterrows():
+        hf_hub_download(
+            repo_id="ASLP-lab/SongFormBench",
+            repo_type="dataset",
+            filename=row["label_path"],
+            local_dir="./downloaded_data/sampled_labels"
+        )
 
 if __name__ == "__main__":
     enriched_path = "./SongFormBench_HS_enriched.csv"
@@ -301,5 +328,12 @@ if __name__ == "__main__":
     # Run the full validation suite
     verify_dataset_integrity(df_original=df, final_df=final_df, mapped_df=mapped_dataset)
     # Save output
-    mapped_dataset.to_json("./sampled_eval_dataset.jsonl", orient="records", lines=True)
-    print("Saved final sampled dataset to ./sampled_eval_dataset.jsonl")
+    mapped_dataset.to_json("./sampled_eval_dataset_tagged.jsonl", orient="records", lines=True)
+    print("Saved final sampled dataset to ./sampled_eval_dataset_tagged.jsonl")
+
+    # save enriched sampled dataset (shortcut for batch processing)
+    final_df.to_csv("./sampled_eval_dataset_enriched_tagged.csv", index=False)
+    print("Saved enriched sampled dataset to ./sampled_eval_dataset_enriched_tagged.csv")
+
+    get_MSA_labels(mapped_dataset)
+    
