@@ -25,6 +25,7 @@ Traditional Music Information Retrieval (MIR) relies on purely acoustic boundary
 - [Evaluation Suite](#-evaluation-suite)
   - [RQ1: Structural Segmentation](#rq1-structural-segmentation)
   - [RQ2: Cross-Modal Semantic Retrieval (CLAP)](#rq2-cross-modal-semantic-retrieval-clap)
+  - [Evaluation Notebooks](#evaluation-notebooks)
 - [Configuration & Providers](#-configuration--providers)
 - [More Information](#-more-information)
 
@@ -235,6 +236,12 @@ python eval/eval_clap_many_to_many.py
 # Generate publication-grade CMC curves and confusion matrices
 python eval/plot_rq2_many_to_many.py
 ```
+
+### Evaluation Notebooks
+Interactive Jupyter notebooks are available in `eval/` for running baselines and computing benchmark metrics:
+- **[`SongFormerBatchInference.ipynb`](eval/SongFormerBatchInference.ipynb)**: Executes batch baseline inference for SongFormer across the evaluation corpus.
+- **[`SongFormerEvaluation.ipynb`](eval/SongFormerEvaluation.ipynb)**: Computes structural segmentation metrics ($F_{0.58}$, $F_{3.0}$, precision, recall) comparing model predictions against ground-truth annotations.
+- **[`futga_kaggle_inference.ipynb`](eval/futga_inference/futga_kaggle_inference.ipynb)**: Standalone Kaggle environment notebook for zero-shot audio captioning inference using FUTGA-7B.
 
 ---
 
