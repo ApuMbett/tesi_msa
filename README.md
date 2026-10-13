@@ -26,7 +26,7 @@ Traditional Music Information Retrieval (MIR) relies on purely acoustic boundary
   - [RQ1: Structural Segmentation](#rq1-structural-segmentation)
   - [RQ2: Cross-Modal Semantic Retrieval (CLAP)](#rq2-cross-modal-semantic-retrieval-clap)
 - [Configuration & Providers](#-configuration--providers)
-- [Citation & Thesis](#-citation--thesis)
+- [More Information](#-more-information)
 
 ---
 
@@ -247,3 +247,9 @@ The system supports multiple LLM inference providers via `LLMFactory`:
 - **Hugging Face Router (`hf/<model>`)**: Serverless inference.
 
 Client-side rate pacing is automatically handled via `RateLimiter` and exponential backoff retry mechanisms to respect provider RPM limits.
+
+---
+
+## 📖 More Information
+
+For further details regarding methodology, system evaluation, and theoretical background, please refer to `tesi.pdf`.
